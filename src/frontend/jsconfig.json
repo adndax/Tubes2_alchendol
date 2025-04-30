@@ -1,7 +1,10 @@
 {
   "compilerOptions": {
     "paths": {
-      "@/*": ["./app/*"]
+      "@/*": ["./app/*"],
+      "@data": ["./data/data.js"],
+      "@utils": ["./lib/utils.js"],
+      "@image/*": ["./public/img/*"]
     }
   }
 }
