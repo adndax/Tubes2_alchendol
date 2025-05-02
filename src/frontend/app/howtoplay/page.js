@@ -153,7 +153,7 @@ export default function HowToPlay() {
                         Now tell me… 
                         <br></br>
                         what treasure are we crafting today?
-                        <br></br>
+                        <br/><br/>
                         1. Type or select the element you want to find 
                         <br/><br/>
                         2. Hit Search and POOF! — your recipe shall appear!
