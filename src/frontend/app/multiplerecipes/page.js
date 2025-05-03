@@ -10,20 +10,32 @@ import { elements } from "@data";
 
 export default function MultipleRecipes() {
   const router = useRouter();
-  const handleSearch = (query) => {
-    console.log("Search for:", query);
-  };
-
+  const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
+
   const itemsPerRow = 8;
   const rowsPerPage = 5;
   const itemsPerPage = itemsPerRow * rowsPerPage;
 
-  const totalPages = Math.ceil(elements.length / itemsPerPage);
+  const [mode, setMode] = useState("multiple"); 
+
+  const filteredElements = useMemo(() => {
+    return elements.filter((el) =>
+      el.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [searchQuery]);
+
+  const totalPages = Math.ceil(filteredElements.length / itemsPerPage);
+
   const currentElements = useMemo(() => {
     const start = (page - 1) * itemsPerPage;
-    return elements.slice(start, start + itemsPerPage);
-  }, [page]);
+    return filteredElements.slice(start, start + itemsPerPage);
+  }, [page, filteredElements]);
+
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    setPage(1); 
+  };
 
   return (
     <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
@@ -35,12 +47,12 @@ export default function MultipleRecipes() {
           </Paragraph>
         </div>
 
-        <RecipeToggle />
+        <RecipeToggle value={mode} onChange={setMode} />
         <SearchBar onSearch={handleSearch} />
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 max-w-screen-xl">
           {currentElements.map((el, index) => (
-            <ElementBox key={index} name={el.name} imageSrc={el.imageSrc} />
+            <ElementBox key={index} name={el.name} imageSrc={el.imageSrc} mode={mode} />
           ))}
         </div>
 
@@ -48,14 +60,16 @@ export default function MultipleRecipes() {
           <PrimaryButton
             onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
             disabled={page === 1}
-            label="<"/
-          >
-          <span className="font-poppins font-bold text-secondary">Page {page} of {totalPages}</span>
+            label="<"
+          />
+          <span className="font-poppins font-bold text-secondary">
+            Page {page} of {totalPages}
+          </span>
           <PrimaryButton
             onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
             disabled={page === totalPages}
-            label=">"/
-          >
+            label=">"
+          />
         </div>
       </div>
     </main>
