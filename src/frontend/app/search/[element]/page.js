@@ -21,7 +21,7 @@ export default function ElementDetailPage() {
 
   return (
     <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
-    <div className="flex flex-col items-center pt-20 gap-22 w-full pb-20">
+    <div className="flex flex-col items-center pt-28 gap-22 w-full pb-20">
       <div className="flex flex-col gap-2 items-center">
         <Heading>The Final Ingredient... Is You!</Heading>
         <Paragraph>
@@ -33,14 +33,14 @@ export default function ElementDetailPage() {
         <div className="flex flex-col items-center p-10 gap-6">
         <ElementsCard name={data.name} imageSrc={data.imageSrc} />
         <Paragraph>{data.description}</Paragraph>
-        <div className="flex flex-col items-center gap-2">
-            <Subheading>
-                Psst... how many do you want?
-            </Subheading>
-            {mode === "multiple" && (
-              <QuantityInput value={0} onChange={(val) => console.log("Jumlah:", val)} />
-              )}
-        </div>
+        {mode === "multiple" && (
+        <>
+          <div className="flex flex-col items-center gap-2">
+            <Subheading>Psst... how many do you want?</Subheading>
+            <QuantityInput value={0} onChange={(val) => console.log("Jumlah:", val)} />
+          </div>
+        </>
+      )}
         </div>
       </BorderBox>
 
