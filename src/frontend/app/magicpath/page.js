@@ -3,7 +3,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Heading, Paragraph } from "@/components/Typography";
-import SpellCard from "@/components/Card";
+import { SpellCard } from "@/components/Card";
 import { spellCards } from "@data";
 import { PrimaryButton } from "@/components/Button";
 
