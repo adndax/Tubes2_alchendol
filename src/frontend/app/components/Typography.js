@@ -42,6 +42,12 @@ export const DescriptionWhite= ({ children, className }) => (
   </p>
 );
 
+export const DescriptionRed= ({ children, className }) => (
+  <p className={cn("text-primary text-sm font-poppins font-bold text-center", className)}>
+    {children}
+  </p>
+);
+
 export const Information = ({ children, className }) => (
   <p className={cn("text-white text-sm font-poppins font-medium text-center", className)}>
     {children}
