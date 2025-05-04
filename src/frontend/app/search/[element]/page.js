@@ -7,6 +7,7 @@ import { BorderBox } from "@/components/BorderBox";
 import { PrimaryButton } from "@/components/Button";
 import QuantityInput from "@/components/QuantityInput";
 import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function ElementDetailPage() {
   const params = useParams();
@@ -14,6 +15,7 @@ export default function ElementDetailPage() {
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") || "shortest"; 
   const data = elements.find((el) => el.name === element);
+  const router = useRouter();
 
   if (!data) {
     return <p className="text-center text-red-500">Element not found</p>;
@@ -44,7 +46,7 @@ export default function ElementDetailPage() {
         </div>
       </BorderBox>
 
-      <PrimaryButton label="Search"/>
+      <PrimaryButton onClick={() => router.push("/searching")} label="Search" />
 
       </div>
     </main>
