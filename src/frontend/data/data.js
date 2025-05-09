@@ -9,16 +9,19 @@ export const spellCards = [
       imageSrc: "/img/bfs.png",
       title: "BFS (Breadth-First Spell)",
       subtitle: "Orderly and precise. The shortest path first!",
+      value: "bfs"
     },
     {
         imageSrc: "/img/bidirectional.png",
         title: "Bidirectional",
         subtitle: "Zap from both ends! Fast and smart like a true wizard!",
+        value: "bidirectional"
       },
     {
       imageSrc: "/img/dfs2.png",
       title: "DFS (Depth-First Spell)",
       subtitle: "Dive deep into the unknown… who knows what you’ll find!",
+      value: "dfs"
     },
 ];
 
