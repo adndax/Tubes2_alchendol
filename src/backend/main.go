@@ -3,9 +3,12 @@ package main
 import (
 	// "github.com/gin-contrib/cors" 
 	// "github.com/gin-gonic/gin"
+	"encoding/json"
 	"Tubes2_alchendol/api"
 	"Tubes2_alchendol/search"
+
 	// "Tubes2_alchendol/scrape"
+
 	"fmt"
 )
 
@@ -25,16 +28,15 @@ func main() {
 		return
 	}
 
-    // elementMap, targetFound := search.CreateFilteredElementMap(elements, "Dust")  // Perlu mengekspos fungsi ini sebagai publik
-    // if targetFound {
-	// 	fmt.Printf("\nElementMap contains: %+v\n", elementMap)
-	// 	return
-	// }
-	
+	result := search.DFS("Bell", elements)
 
-	result := search.DFS("Firetruck", elements)
-		fmt.Printf("Hasil pencarian: %+v\n", result)
+	jsonResult, err := json.MarshalIndent(result.RecipeTree, "", "  ")
+	if err != nil {
+		fmt.Println("Error during serialization:", err)
+		return
+	}
 	
+	fmt.Println(string(jsonResult))
 
 }
 

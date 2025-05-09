@@ -14,6 +14,14 @@ type RecipeNode struct {
     IsBasic    bool         `json:"isBasic"`
 }
 
+type RecipeTree struct {
+    Root     string       `json:"root"`
+    Left     string       `json:"Left"`
+    Right    string       `json:"Right"`
+    Tier     string       `json:"Tier"`
+    Children []RecipeTree `json:"children"`
+}
+
 // Struktur untuk respons API
 type SearchResponse struct {
     Recipes      []RecipeNode `json:"recipes"`
@@ -23,10 +31,7 @@ type SearchResponse struct {
 
 // Struktur untuk hasil pencarian recipe
 type SearchResult struct {
-    Recipes      []RecipeNode `json:"recipes"`
-    NodesVisited int          `json:"nodesVisited"`
-    TimeElapsed  float64      `json:"timeElapsed,omitempty"`
-    Error        string       `json:"error,omitempty"`
+    RecipeTree   RecipeTree   `json:"recipeTree,omitempty"` // Add this field
 }
 
 // Struktur untuk request API
