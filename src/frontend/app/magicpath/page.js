@@ -10,6 +10,7 @@ import { PrimaryButton } from "@/components/Button";
 export default function MagicPath() {
   const router = useRouter();
   const [selectedCardIndex, setSelectedCardIndex] = useState(null);
+  const [showError, setShowError] = useState(false); // 🔹 Tambahkan state error
 
   return (
     <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
@@ -30,12 +31,35 @@ export default function MagicPath() {
               key={index}
               {...card}
               isSelected={selectedCardIndex === index}
-              onClick={() => setSelectedCardIndex(index === selectedCardIndex ? null : index)}
+              onClick={() => {
+                setSelectedCardIndex(index === selectedCardIndex ? null : index);
+                setShowError(false); // 🔹 Reset error saat pilih kartu
+              }}
             />
           ))}
         </div>
 
-        <PrimaryButton onClick={() => router.push("/multiplerecipes")} label="Meow" />
+        <div className="flex flex-col gap-3">
+          <PrimaryButton
+            onClick={() => {
+              const selected = spellCards[selectedCardIndex]?.value;
+              if (selected) {
+                router.push(`/multiplerecipes?algo=${selected}`);
+              } else {
+                setShowError(true); // 🔹 Tampilkan error
+              }
+            }}
+            label="Meow"
+          />
+
+          {showError && (
+            <Paragraph>
+              Pick a spell first!
+            </Paragraph>
+          )}
+
+        </div>
+
       </div>
     </main>
   );
