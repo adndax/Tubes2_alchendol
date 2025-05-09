@@ -28,34 +28,57 @@ func LoadRecipeData() ([]models.Element, error) {
 }
 
 func SearchHandler(c *gin.Context) {
-	algo := c.Query("algo")
-	target := strings.TrimSpace(c.Query("target"))
+    algo := c.Query("algo")
+    target := strings.TrimSpace(c.Query("target"))
 
-	if target == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
-		return
-	}
+    if target == "" {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
+        return
+    }
 
-	elements, err := LoadRecipeData()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal load recipes"})
-		return
-	}
+    elements, err := LoadRecipeData()
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal load recipes"})
+        return
+    }
 
-	switch algo {
-	case "DFS":
-		result := search.DFS(target, elements)
+    switch algo {
+    case "DFS":
+        result := search.DFS(target, elements)
+        
+        // Manual JSON output
+        c.Header("Content-Type", "application/json")
+        prettyJSON, err := json.MarshalIndent(result, "", "    ")
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+            return
+        }
+        c.Writer.Write(prettyJSON)
+    
+    case "bidirectional":
+        recipeTree, timeTaken, nodesVisited := search.BidirectionalSearch(target, elements)
+        
+        // Buat hasil yang kompatibel dengan D3
+        result := models.SearchResult{
+            RecipeTree: recipeTree,
+        }
+        
+        // Tambahkan data statistik
+        response := gin.H{
+            "root": result.RecipeTree,
+            "timeElapsed": timeTaken,
+            "nodesVisited": nodesVisited,
+        }
+        
+        c.Header("Content-Type", "application/json")
+        prettyJSON, err := json.MarshalIndent(response, "", "    ")
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+            return
+        }
+        c.Writer.Write(prettyJSON)
 
-		// Manual JSON output
-		c.Header("Content-Type", "application/json")
-		prettyJSON, err := json.MarshalIndent(result, "", "    ")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-			return
-		}
-		c.Writer.Write(prettyJSON)
-
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali"})
-	}
+    default:
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali"})
+    }
 }
