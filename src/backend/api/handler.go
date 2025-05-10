@@ -44,11 +44,22 @@ func SearchHandler(c *gin.Context) {
 
     switch algo {
     case "DFS":
-        result := search.DFS(target, elements)
+        recipeTree, timeTaken, nodesVisited := search.DFS(target, elements)
         
-        // Manual JSON output
+        // Buat hasil yang kompatibel dengan D3
+        result := models.SearchResult{
+            RecipeTree: recipeTree,
+        }
+        
+        // Tambahkan data statistik
+        response := gin.H{
+            "root": result.RecipeTree,
+            "timeElapsed": timeTaken,
+            "nodesVisited": nodesVisited,
+        }
+        
         c.Header("Content-Type", "application/json")
-        prettyJSON, err := json.MarshalIndent(result, "", "    ")
+        prettyJSON, err := json.MarshalIndent(response, "", "    ")
         if err != nil {
             c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
             return
