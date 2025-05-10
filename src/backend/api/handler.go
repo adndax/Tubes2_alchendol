@@ -42,8 +42,8 @@ func SearchHandler(c *gin.Context) {
         return
     }
 
-    switch algo {
-    case "DFS":
+    switch strings.ToLower(algo) {
+    case "dfs":
         recipeTree, timeTaken, nodesVisited := search.DFS(target, elements)
         
         // Buat hasil yang kompatibel dengan D3
