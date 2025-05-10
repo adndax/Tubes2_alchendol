@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+    "fmt"
 
 	"github.com/gin-gonic/gin"
 	"Tubes2_alchendol/search"
@@ -28,8 +30,19 @@ func LoadRecipeData() ([]models.Element, error) {
 }
 
 func SearchHandler(c *gin.Context) {
+    // Get parameters that match frontend expectations
     algo := c.Query("algo")
     target := strings.TrimSpace(c.Query("target"))
+    mode := c.Query("mode") // "shortest" or "multiple"
+    multipleStr := c.Query("multiple") // fallback parameter
+    maxRecipesStr := c.Query("maxRecipes")
+
+    // Debug logging
+    println("Received parameters:")
+    println("algo:", algo)
+    println("target:", target)
+    println("multiple:", multipleStr)
+    println("maxRecipes:", maxRecipesStr)
 
     if target == "" {
         c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
@@ -42,54 +55,118 @@ func SearchHandler(c *gin.Context) {
         return
     }
 
-    switch strings.ToLower(algo) {
-    case "dfs":
-        recipeTree, timeTaken, nodesVisited := search.DFS(target, elements)
-        
-        // Buat hasil yang kompatibel dengan D3
-        result := models.SearchResult{
-            RecipeTree: recipeTree,
-        }
-        
-        // Tambahkan data statistik
-        response := gin.H{
-            "root": result.RecipeTree,
-            "timeElapsed": timeTaken,
-            "nodesVisited": nodesVisited,
-        }
-        
-        c.Header("Content-Type", "application/json")
-        prettyJSON, err := json.MarshalIndent(response, "", "    ")
-        if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-            return
-        }
-        c.Writer.Write(prettyJSON)
+    // Determine if multiple recipes requested
+    // Check both mode parameter and multiple parameter
+    multiple := false
+    if mode == "multiple" {
+        multiple = true
+    } else if multipleStr == "true" {
+        multiple = true
+    }
     
-    case "bidirectional":
-        recipeTree, timeTaken, nodesVisited := search.BidirectionalSearch(target, elements)
-        
-        // Buat hasil yang kompatibel dengan D3
-        result := models.SearchResult{
-            RecipeTree: recipeTree,
+    // If no mode or multiple parameter, check if maxRecipes > 1
+    if mode == "" && multipleStr == "" && maxRecipesStr != "" {
+        if max, err := strconv.Atoi(maxRecipesStr); err == nil && max > 1 {
+            multiple = true
         }
-        
-        // Tambahkan data statistik
-        response := gin.H{
-            "root": result.RecipeTree,
-            "timeElapsed": timeTaken,
-            "nodesVisited": nodesVisited,
+    }
+
+    // Get max recipes count
+    maxRecipes := 5 // default
+    if maxRecipesStr != "" {
+        if max, err := strconv.Atoi(maxRecipesStr); err == nil {
+            maxRecipes = max
         }
-        
-        c.Header("Content-Type", "application/json")
-        prettyJSON, err := json.MarshalIndent(response, "", "    ")
-        if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-            return
+    }
+
+    println("Using multiple:", multiple)
+    println("Max recipes:", maxRecipes)
+
+    switch algo {
+    case "DFS":
+        if multiple {
+            // Multiple DFS
+            recipes, timeElapsed, nodesVisited := search.MultipleDFS(target, elements, maxRecipes)
+            
+            // Debug: Check what we got back
+            fmt.Printf("DEBUG: MultipleDFS returned %d recipes for %s (maxRecipes=%d)\n", 
+                len(recipes), target, maxRecipes)
+                
+            appendRecipes := map[string] interface{}{
+                "nodesVisited": nodesVisited,
+                "roots": recipes,
+                "timeElapsed": timeElapsed,
+                
+            }
+                
+            // Use same format as single DFS
+            response := gin.H{
+                "nodesVisited": appendRecipes["nodesVisited"],
+                "roots": appendRecipes["roots"],
+                "timeElapsed": appendRecipes["timeElapsed"],
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
+        }else {
+            // Single DFS (remains the same)
+            recipeTree, timeElapsed, nodesVisited := search.DFS(target, elements)
+            
+            response := gin.H{
+                "nodesVisited": nodesVisited,
+                "root": recipeTree,
+                "timeElapsed": timeElapsed,
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
         }
-        c.Writer.Write(prettyJSON)
+    
+    case "BFS":
+        // Add BFS implementation when available
+        if multiple {
+            // Multiple BFS - to be implemented
+            c.JSON(http.StatusNotImplemented, gin.H{"error": "Multiple BFS belum diimplementasi"})
+        } else {
+            // Single BFS - to be implemented  
+            c.JSON(http.StatusNotImplemented, gin.H{"error": "BFS belum diimplementasi"})
+        }
+    
+    case "bidirectional", "Bidirectional":
+        if multiple {
+            // Multiple Bidirectional - to be implemented
+            c.JSON(http.StatusNotImplemented, gin.H{"error": "Multiple Bidirectional belum diimplementasi"})
+        } else {
+            // Single Bidirectional
+            recipeTree, timeElapsed, nodesVisited := search.BidirectionalSearch(target, elements)
+            
+            // Format response with single root
+            response := gin.H{
+                "nodesVisited": nodesVisited,
+                "root": recipeTree,
+                "timeElapsed": timeElapsed,
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
+        }
 
     default:
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali"})
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali: " + algo})
     }
 }

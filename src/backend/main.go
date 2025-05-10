@@ -45,12 +45,36 @@ func runCLI() {
     }
 
     // Pilih algoritma dan target dari input terminal
-    var algo, target string
+    var algo, target, multiple string
     fmt.Print("Pilih algoritma (DFS / BIDIRECTIONAL): ")
     fmt.Scanln(&algo)
+    fmt.Print("Masukkan mode multiple recipe (y/n): ")
+    fmt.Scanln(&multiple)
     fmt.Print("Masukkan nama elemen target: ")
     fmt.Scanln(&target)
 
+    switch multiple {
+    case "y":
+        var maxRecipes int
+        fmt.Print("Masukkan jumlah maksimal resep yang ingin dicari (max 100): ")
+        fmt.Scanln(&maxRecipes)
+        recipes, timeTaken, nodes := search.MultipleDFS(target, elements, maxRecipes)
+        fmt.Printf("Multiple DFS selesai dalam %.6f detik, %d node dikunjungi\n", timeTaken, nodes)
+        
+        // Output all recipes as a single JSON array
+        output := map[string]interface{}{
+            "roots": recipes,
+            "timeElapsed": timeTaken,
+            "nodesVisited": nodes,
+        }
+        outputResult(output)
+        return
+    case "n":
+        // Do nothing, continue to single recipe search
+    default:
+        fmt.Println("Pilihan tidak valid. Gunakan 'y' untuk multiple atau 'n' untuk single.")
+        return
+    }
     // Hasil pencarian
     switch algo {
     case "DFS":
