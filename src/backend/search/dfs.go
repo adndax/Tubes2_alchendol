@@ -3,7 +3,7 @@ package search
 import (
 	"fmt"
 	"strconv"
-
+	"time"
 
 	"Tubes2_alchendol/models"
 )
@@ -104,16 +104,15 @@ type DFSState struct {
 	Cache        *RecipeCache
 }
 
-// Fungsi utama untuk DFS - mencari satu recipe terpendek dan returning models.RecipeTree
-func DFS(target string, elements []models.Element) models.SearchResult {
+// Fungsi utama untuk DFS - mencari satu recipe terpendek
+func DFS(target string, elements []models.Element) (models.RecipeTree, float64, int) {
 	// Initialize start time
+	startTime := time.Now()
 	
 	// Filter elements based on tier constraint
 	elementMap, targetFound := CreateFilteredElementMap(elements, target)
 	if !targetFound {
-		return models.SearchResult{
-			RecipeTree: models.RecipeTree{},
-		}
+		return models.RecipeTree{}, time.Since(startTime).Seconds(), 0
 	}
 	
 	// Add basic elements to map
@@ -129,9 +128,7 @@ func DFS(target string, elements []models.Element) models.SearchResult {
 			Children: []models.RecipeTree{},
 		}
 		
-		return models.SearchResult{
-			RecipeTree:   basicTree, // Add this field to SearchResult
-		}
+		return basicTree, time.Since(startTime).Seconds(), 1
 	}
 	
 	// Initialize DFS state with cache
@@ -146,17 +143,13 @@ func DFS(target string, elements []models.Element) models.SearchResult {
 	// Start DFS search with cache
 	recipeNode, found := dfsSearchRecipe(state, target)
 	if !found {
-		return models.SearchResult{
-			RecipeTree: models.RecipeTree{},
-		}
+		return models.RecipeTree{}, time.Since(startTime).Seconds(), state.NodesVisited
 	}
 	
 	// Convert the RecipeNode to models.RecipeTree
 	recipeTree := ConvertToRecipeTree(recipeNode, elementMap)
 	
-	return models.SearchResult{
-		RecipeTree:   recipeTree,
-	}
+	return recipeTree, time.Since(startTime).Seconds(), state.NodesVisited
 }
 
 // Helper function untuk memeriksa apakah elemen ada dalam path
@@ -313,12 +306,4 @@ func ConvertToRecipeTree(node models.RecipeNode, elementMap map[string][]models.
 	}
 	
 	return recipeTree
-}
-
-// Standalone function to get just the models.RecipeTree
-func GetRecipeTree(target string, elements []models.Element) (models.RecipeTree, error) {
-	result := DFS(target, elements)
-	
-	// The models.RecipeTree should be part of the result
-	return result.RecipeTree, nil
 }
