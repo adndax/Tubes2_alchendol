@@ -56,16 +56,32 @@ func CreateFilteredElementMap(elements []models.Element, target string) (map[str
 	targetFound := false
 	elementMap := make(map[string][]models.Element)
 	targetTier := -1
+	skippedDueToTime := 0
 	
 	// Find target element and its tier
 	for _, el := range elements {
 		if el.Name == target {
 			targetFound = true
+			
+			// Skip this recipe if it contains "Time"
+			if containsTime(el.Recipes) {
+				skippedDueToTime++
+				fmt.Printf("DEBUG: Skipping recipe for %s because it contains Time: %v\n", el.Name, el.Recipes)
+				continue
+			}
+			
 			if el.Tier > targetTier {
 				targetTier = el.Tier
 			}
+			
 			elementMap[el.Name] = append(elementMap[el.Name], el)
+			fmt.Printf("DEBUG: Added target recipe for %s: %v (Tier: %d)\n", el.Name, el.Recipes, el.Tier)
 		}
+	}
+	
+	if targetFound {
+		fmt.Printf("DEBUG: Target '%s' found, Tier: %d, Valid recipes: %d, Skipped due to Time: %d\n", 
+			target, targetTier, len(elementMap[target]), skippedDueToTime)
 	}
 	
 	if !targetFound {
@@ -73,10 +89,21 @@ func CreateFilteredElementMap(elements []models.Element, target string) (map[str
 		return elementMap, false
 	}
 	
+	// Check if all recipes were filtered out
+	if len(elementMap[target]) == 0 {
+		fmt.Printf("DEBUG: All recipes for target '%s' were filtered out (contained Time)\n", target)
+		return elementMap, false
+	}
+	
 	// Add elements with lower tier than target or basic elements
 	for _, el := range elements {
 		if el.Name == target {
-			continue  // Already added
+			continue  // Already processed
+		}
+		
+		// Skip this recipe if it contains "Time"
+		if containsTime(el.Recipes) {
+			continue
 		}
 		
 		// Add element if its tier is lower than target's tier
@@ -92,7 +119,19 @@ func CreateFilteredElementMap(elements []models.Element, target string) (map[str
 		}
 	}
 	
+	fmt.Printf("DEBUG: Final elementMap size: %d\n", len(elementMap))
+	
 	return elementMap, true
+}
+
+// Helper function to check if recipes contain "Time"
+func containsTime(recipes []string) bool {
+	for _, recipe := range recipes {
+		if recipe == "Time" {
+			return true
+		}
+	}
+	return false
 }
 
 // Struktur untuk menyimpan state pencarian DFS
