@@ -19,11 +19,11 @@ export const BorderBox = ({ children, className, height }) => (
   </div>
 );
 
-export const ElementBox = ({ name, imageSrc, mode = "shortest" }) => {
+export const ElementBox = ({ name, imageSrc, mode = "shortest", algo = "dfs" }) => {
   const router = useRouter();
 
   const handleClick = () => {
-    router.push(`/search/${encodeURIComponent(name)}?mode=${mode}`);
+    router.push(`/search/${encodeURIComponent(name)}?mode=${mode}&algo=${algo}`);
   };
 
   return (

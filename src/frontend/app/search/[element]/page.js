@@ -1,4 +1,5 @@
-"use client"; // ⬅️ ini penting
+// In page.js for the element detail page
+"use client";
 import { useParams } from "next/navigation";
 import { elements } from "@data";
 import { Heading, Paragraph, Subheading } from "@/components/Typography";
@@ -13,7 +14,8 @@ export default function ElementDetailPage() {
   const params = useParams();
   const element = decodeURIComponent(params.element);
   const searchParams = useSearchParams();
-  const mode = searchParams.get("mode") || "shortest"; 
+  const mode = searchParams.get("mode") || "shortest";
+  const algo = searchParams.get("algo") || "DFS"; // Read algorithm
   const data = elements.find((el) => el.name === element);
   const router = useRouter();
 
@@ -27,26 +29,29 @@ export default function ElementDetailPage() {
       <div className="flex flex-col gap-2 items-center">
         <Heading>The Final Ingredient... Is You!</Heading>
         <Paragraph>
-        The elements are ready… the scrolls have aligned… now all we need is a tiny click!
+          The elements are ready… the scrolls have aligned… now all we need is a tiny click!
         </Paragraph>
       </div>
 
       <BorderBox className="w-full">
         <div className="flex flex-col items-center p-10 gap-6">
-        <ElementsCard name={data.name} imageSrc={data.imageSrc} />
-        <Paragraph>{data.description}</Paragraph>
-        {mode === "multiple" && (
-        <>
-          <div className="flex flex-col items-center gap-2">
-            <Subheading>Psst... how many do you want?</Subheading>
-            <QuantityInput value={0} onChange={(val) => console.log("Jumlah:", val)} />
-          </div>
-        </>
-      )}
+          <ElementsCard name={data.name} imageSrc={data.imageSrc} />
+          <Paragraph>{data.description}</Paragraph>
+          {mode === "multiple" && (
+            <>
+              <div className="flex flex-col items-center gap-2">
+                <Subheading>Psst... how many do you want?</Subheading>
+                <QuantityInput value={0} onChange={(val) => console.log("Jumlah:", val)} />
+              </div>
+            </>
+          )}
         </div>
       </BorderBox>
 
-      <PrimaryButton onClick={() => router.push("/searching")} label="Search" />
+      <PrimaryButton 
+        onClick={() => router.push(`/result?target=${element}&algo=${algo}`)} 
+        label="Search" 
+      />
 
       </div>
     </main>
