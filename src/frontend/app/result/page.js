@@ -37,8 +37,8 @@ function ResultPageContent() {
             <TreeDiagram 
               target={target} 
               algo={algo}
-              mode={mode === "multiple" ? "multiple" : "single"}
-              maxRecipes={quantity}
+              mode={mode}
+              quantity={quantity}
               onStatsUpdate={({ nodeCount, timeMs }) => {
                 setStats({ nodeCount, timeMs });
               }}
