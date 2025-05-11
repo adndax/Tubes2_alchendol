@@ -44,6 +44,12 @@ type Node struct {
 	Tier    int
 }
 
+// RecipeResult represents a result from concurrent search
+type RecipeResult struct {
+	Recipe RecipeTree
+	Found  bool
+}
+
 func IsBasicElement(element Element) bool {
     return element.Tier == 0
 }
