@@ -12,7 +12,8 @@ export default function ResultPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const target = searchParams.get("target");
-  const algo = searchParams.get("algo") || "DFS";
+  const mode = searchParams.get("mode") || "multiple";
+  const algo = searchParams.get("algo") || "dfs";
   const [stats, setStats] = useState({ nodeCount: 0, timeMs: 0 });
 
   if (!target) {
@@ -25,7 +26,7 @@ export default function ResultPage() {
         <div className="flex flex-col gap-4 items-center">
           <Heading>Eureka! Here's Your Alchemy Route</Heading>
           <Paragraph>
-            You searched, I conjured, and here it is — your magical recipe revealed!
+            You're searching in <strong>{mode}</strong> mode using the <strong>{algo}</strong> spell.
           </Paragraph>
         </div>
 

@@ -8,7 +8,7 @@ const RecipeToggle = () => {
   const searchParams = useSearchParams();
 
   const isShortest = pathname.includes("shortest");
-  const algo = searchParams.get("algo") || "DFS"; // default fallback
+  const algo = searchParams.get("algo") || "dfs"; // default fallback
 
   return (
     <div className="flex bg-secondary rounded-lg border border-secondary p-1 gap-5 w-fit">

@@ -10,7 +10,7 @@ import { elements } from "@data";
 
 export default function ShortestRecipe() {
   const searchParams = useSearchParams();
-  const algo = searchParams.get("algo") || "null"; // ⬅️ Ambil dari query param
+  const algo = searchParams.get("algo") || "dfs"; // ⬅️ Ambil dari query param
 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);

@@ -10,7 +10,7 @@ import { elements } from "@data";
 
 export default function MultipleRecipes() {
   const searchParams = useSearchParams();
-  const algo = searchParams.get("algo") || "null";
+  const algo = searchParams.get("algo") || "dfs";
   
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
