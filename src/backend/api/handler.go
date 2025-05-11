@@ -132,15 +132,27 @@ func SearchHandler(c *gin.Context) {
             c.Writer.Write(prettyJSON)
         }
     
-    case "BFS":
-        // Add BFS implementation when available
+        case "BFS":
         if multiple {
-            // Multiple BFS - to be implemented
             c.JSON(http.StatusNotImplemented, gin.H{"error": "Multiple BFS belum diimplementasi"})
         } else {
-            // Single BFS - to be implemented  
-            c.JSON(http.StatusNotImplemented, gin.H{"error": "BFS belum diimplementasi"})
+            recipeTree, timeElapsed, nodesVisited := search.BFS(target, elements)
+
+            response := gin.H{
+                "nodesVisited": nodesVisited,
+                "root": recipeTree,
+                "timeElapsed": timeElapsed,
+            }
+
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
         }
+
     
     case "bidirectional", "Bidirectional":
         if multiple {

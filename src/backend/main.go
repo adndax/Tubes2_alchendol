@@ -85,6 +85,10 @@ func runCLI() {
         recipes, timeTaken, nodes := search.BidirectionalSearch(target, elements)
         fmt.Printf("Bidirectional selesai dalam %.6f detik, %d node dikunjungi\n", timeTaken, nodes)
         outputResult(recipes)
+    case "BFS":
+        recipes, timeTaken, nodes := search.BFS(target, elements)
+        fmt.Printf("BFS selesai dalam %.6f detik, %d node dikunjungi\n", timeTaken, nodes)
+        outputResult(recipes)
     default:
         fmt.Println("Algoritma tidak dikenali. Gunakan 'DFS' atau 'BIDIRECTIONAL'.")
     }
