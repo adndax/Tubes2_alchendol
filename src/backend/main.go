@@ -53,10 +53,10 @@ func runCLI() {
 
     // Hasil pencarian
     switch algo {
-    case "DFS":
+    case "dfs":
         result := search.DFS(target, elements)
         outputResult(result.RecipeTree)
-    case "BIDIRECTIONAL":
+    case "bidirectional":
         recipes, timeTaken, nodes := search.BidirectionalSearch(target, elements)
         fmt.Printf("Bidirectional selesai dalam %.6f detik, %d node dikunjungi\n", timeTaken, nodes)
         outputResult(recipes)
