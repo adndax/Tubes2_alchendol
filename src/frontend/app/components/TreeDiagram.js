@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { elements } from "@data";
 
-export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", maxRecipes = 5, onStatsUpdate }) {
+export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", quantity = 1, onStatsUpdate }) {
   const ref = useRef();
   const [treeData, setTreeData] = useState(null);
   const [error, setError] = useState(null);
@@ -25,7 +25,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     
     let url = `http://localhost:8080/api/search?algo=${formattedAlgo}&target=${encodeURIComponent(target)}`;
     if (mode === "multiple") {
-      url += `&multiple=true&maxRecipes=${maxRecipes}`;
+      url += `&multiple=true&maxRecipes=${quantity}`;
     }
     
     fetch(url)
@@ -72,7 +72,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         setError(err.message);
         setLoading(false);
       });
-  }, [target, algo, mode, maxRecipes]);
+  }, [target, algo, mode, quantity]);
 
   const createMultipleRecipeTree = (roots, targetName) => {
     // Create a parent node that contains all recipe trees

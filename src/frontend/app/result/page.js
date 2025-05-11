@@ -13,6 +13,8 @@ export default function ResultPage() {
   const router = useRouter();
   const target = searchParams.get("target");
   const algo = searchParams.get("algo") || "DFS";
+  const mode = searchParams.get("mode") || "single";
+  const quantity = parseInt(searchParams.get("quantity") || "1", 10);
   const [stats, setStats] = useState({ nodeCount: 0, timeMs: 0 });
 
   if (!target) {
@@ -34,6 +36,8 @@ export default function ResultPage() {
             <TreeDiagram 
               target={target} 
               algo={algo}
+              mode={mode}
+              quantity={quantity}
               onStatsUpdate={({ nodeCount, timeMs }) => {
                 setStats({ nodeCount, timeMs });
               }}

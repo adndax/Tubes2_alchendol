@@ -33,7 +33,10 @@ func (c *RecipeCache) Set(elementName string, node models.RecipeNode) {
 
 // Check if element is a basic element
 func IsBasicElement(elementName string) bool {
-	return elementName == "Air" || elementName == "Earth" || elementName == "Fire" || elementName == "Water"
+	return elementName == "Air" || elementName == "Earth" || elementName == "Fire" || 
+	elementName == "Water" || elementName == "Clock" || elementName == "Death" || 
+	elementName == "Dinosaur" || elementName == "Family Tree" || elementName == "Peat" || 
+	elementName == "Skeleton" || elementName == "Sloth" || elementName == "Tree" 
 }
 
 // Add basic elements to the element map
