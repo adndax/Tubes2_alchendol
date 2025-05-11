@@ -9,6 +9,7 @@ import { PrimaryButton } from "@/components/Button";
 import QuantityInput from "@/components/QuantityInput";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function ElementDetailPage() {
   const params = useParams();
@@ -18,6 +19,7 @@ export default function ElementDetailPage() {
   const algo = searchParams.get("algo") || "DFS"; // Read algorithm
   const data = elements.find((el) => el.name === element);
   const router = useRouter();
+  const [quantity, setQuantity] = useState(0);
 
   if (!data) {
     return <p className="text-center text-red-500">Element not found</p>;
@@ -41,7 +43,7 @@ export default function ElementDetailPage() {
             <>
               <div className="flex flex-col items-center gap-2">
                 <Subheading>Psst... how many do you want?</Subheading>
-                <QuantityInput value={0} onChange={(val) => console.log("Jumlah:", val)} />
+                <QuantityInput value={quantity} onChange={(val) => setQuantity(val)} />
               </div>
             </>
           )}
@@ -49,10 +51,15 @@ export default function ElementDetailPage() {
       </BorderBox>
 
       <PrimaryButton 
-        onClick={() => router.push(`/result?target=${element}&algo=${algo}`)} 
+        onClick={() => {
+          const baseUrl = `/result?target=${element}&algo=${algo}&mode=${mode}`;
+          const fullUrl = mode === "multiple"
+            ? `${baseUrl}&maxRecipes=${quantity}`
+            : baseUrl;
+          router.push(fullUrl);
+        }} 
         label="Search" 
       />
-
       </div>
     </main>
   );
