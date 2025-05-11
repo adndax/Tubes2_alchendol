@@ -14,7 +14,8 @@ export default function ResultPage() {
   
   // Get search parameters from URL
   const target = searchParams.get("target");
-  const algo = searchParams.get("algo") || "DFS";
+  // Handle "null" as a string by providing a default
+  const algo = searchParams.get("algo") === "null" ? "DFS" : (searchParams.get("algo") || "DFS");
   const mode = searchParams.get("mode") || "shortest";
   const quantity = parseInt(searchParams.get("quantity") || "5", 10);
   
@@ -27,10 +28,12 @@ export default function ResultPage() {
     mode: null,
     quantity: null
   });
+  
+  console.log("Current parameters:", { target, algo, mode, quantity });
 
   // Save parameters to localStorage when they change
   useEffect(() => {
-    if (target && algo && mode) {
+    if (target) {
       // Store params in state
       setSavedParams({
         target,
@@ -60,7 +63,10 @@ export default function ResultPage() {
           
           // If we have saved params and no current params, redirect to keep params in URL
           if (savedParams.target && !target) {
-            let url = `/result?target=${encodeURIComponent(savedParams.target)}&algo=${savedParams.algo || 'DFS'}`;
+            // Ensure algorithm isn't "null"
+            const safeAlgo = savedParams.algo === "null" ? "DFS" : (savedParams.algo || "DFS");
+            
+            let url = `/result?target=${encodeURIComponent(savedParams.target)}&algo=${encodeURIComponent(safeAlgo)}`;
             if (savedParams.mode) {
               url += `&mode=${savedParams.mode}`;
             }
@@ -107,12 +113,20 @@ export default function ResultPage() {
     router.push("/");
   };
 
-  // Get the effective parameters to use
+  // Get the effective parameters to use - ensure we handle "null" string values
   const effectiveTarget = target || savedParams.target;
-  // Normalize algorithm to uppercase for consistency
-  const effectiveAlgo = (algo || savedParams.algo || "DFS").toUpperCase();
+  // Handle "null" as a string for algorithm from any source
+  const rawAlgo = algo || savedParams.algo || "DFS";
+  const effectiveAlgo = rawAlgo === "null" ? "DFS" : rawAlgo.toUpperCase();
   const effectiveMode = mode || savedParams.mode || "shortest";
   const effectiveQuantity = quantity || savedParams.quantity || 5;
+  
+  console.log("Effective parameters:", { 
+    effectiveTarget, 
+    effectiveAlgo, 
+    effectiveMode,
+    effectiveQuantity 
+  });
 
   if (error) {
     return (
