@@ -9,19 +9,38 @@ import { PrimaryButton } from "@/components/Button";
 import QuantityInput from "@/components/QuantityInput";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
+import { useState } from "react"; // Add this import
 
 export default function ElementDetailPage() {
   const params = useParams();
   const element = decodeURIComponent(params.element);
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") || "shortest";
-  const algo = searchParams.get("algo") || "DFS"; // Read algorithm
+  const algo = searchParams.get("algo") || "DFS";
   const data = elements.find((el) => el.name === element);
   const router = useRouter();
+  
+  // Add state for quantity
+  const [quantity, setQuantity] = useState(1);
 
   if (!data) {
     return <p className="text-center text-red-500">Element not found</p>;
   }
+
+  // Update the click handler to include mode and quantity
+  const handleSearch = () => {
+    let url = `/result?target=${element}&algo=${algo}`;
+    
+    // Add mode parameter
+    url += `&mode=${mode}`;
+    
+    // If mode is multiple, add quantity parameter
+    if (mode === "multiple") {
+      url += `&quantity=${quantity}`;
+    }
+    
+    router.push(url);
+  };
 
   return (
     <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
@@ -41,7 +60,10 @@ export default function ElementDetailPage() {
             <>
               <div className="flex flex-col items-center gap-2">
                 <Subheading>Psst... how many do you want?</Subheading>
-                <QuantityInput value={0} onChange={(val) => console.log("Jumlah:", val)} />
+                <QuantityInput 
+                  value={quantity} 
+                  onChange={(val) => setQuantity(val)} 
+                />
               </div>
             </>
           )}
@@ -49,7 +71,7 @@ export default function ElementDetailPage() {
       </BorderBox>
 
       <PrimaryButton 
-        onClick={() => router.push(`/result?target=${element}&algo=${algo}`)} 
+        onClick={handleSearch} // Use the new handler
         label="Search" 
       />
 
