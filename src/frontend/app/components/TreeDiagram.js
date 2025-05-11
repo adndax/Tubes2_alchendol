@@ -9,6 +9,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [timeoutId, setTimeoutId] = useState(null);
+  const [renderAttempted, setRenderAttempted] = useState(false);
 
   // Create a map for element images - simplified mapping
   const elementImageMap = {};
@@ -16,6 +17,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     elementImageMap[element.name] = element.imageSrc;
   });
 
+  // Effect to handle fetching data
   useEffect(() => {
     if (!target) return;
 
@@ -24,17 +26,26 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       clearTimeout(timeoutId);
     }
 
+    // Reset states on new request
     setLoading(true);
     setError(null);
+    setTreeData(null);
+    setRenderAttempted(false);
 
     const formattedAlgo = algo.toUpperCase() === "BIDIRECTIONAL" ? "bidirectional" : algo.toUpperCase();
     
+    // Build the correct URL with all parameters
     let url = `http://localhost:8080/api/search?algo=${formattedAlgo}&target=${encodeURIComponent(target)}`;
+    
+    // Important: Make sure we're passing maxRecipes correctly
     if (mode === "multiple") {
-      url += `&multiple=true&maxRecipes=${maxRecipes}`;
+      // Use both mode and multiple parameters to ensure compatibility
+      url += `&mode=multiple&multiple=true&maxRecipes=${maxRecipes}`;
     }
     
-    // Set client-side timeout to handle cases where the server doesn't respond
+    console.log("Fetching from URL:", url);
+    
+    // Set client-side timeout
     const fetchTimeoutId = setTimeout(() => {
       setLoading(false);
       setError(`Request timed out after 15 seconds. The server might be busy or the element "${target}" might be too complex to process.`);
@@ -62,29 +73,40 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         return res.json();
       })
       .then((data) => {
+        console.log("Raw response data:", JSON.stringify(data, null, 2));
+        
         // Handle both single and multiple response formats
         let rootData;
         let nodeCount;
         
-        console.log("Raw response data:", JSON.stringify(data, null, 2));
-        
-        if (mode === "multiple" && data.roots && data.roots.length > 0) {
-          // For multiple mode, create a parent node to hold all recipes
-          rootData = createMultipleRecipeTree(data.roots, target);
-          nodeCount = data.nodesVisited || countNodesInTree(rootData);
-        } else if (data.root) {
-          rootData = data.root;
-          nodeCount = data.nodesVisited || countNodesInTree(rootData);
-        } else if (data.roots && data.roots.length === 0) {
-          throw new Error(`No recipes found for "${target}"`);
+        if (mode === "multiple") {
+          if (data.roots && Array.isArray(data.roots)) {
+            if (data.roots.length > 0) {
+              // For multiple mode, create a parent node to hold all recipes
+              rootData = createMultipleRecipeTree(data.roots, target);
+              nodeCount = data.nodesVisited || countNodesInTree(rootData);
+            } else {
+              // When we have an empty array, show a friendly message
+              throw new Error(`No recipes could be found for "${target}" in multiple mode. Try a different element or algorithm.`);
+            }
+          } else {
+            throw new Error('Invalid response format for multiple recipes mode');
+          }
         } else {
-          throw new Error('Invalid tree data structure');
+          // Single recipe mode
+          if (data.root) {
+            rootData = data.root;
+            nodeCount = data.nodesVisited || countNodesInTree(rootData);
+          } else {
+            throw new Error('No recipe found in response');
+          }
         }
         
         if (!rootData) {
-          throw new Error('No tree data found');
+          throw new Error('No tree data could be processed');
         }
         
+        // Store the tree data in state
         setTreeData(rootData);
 
         if (onStatsUpdate) {
@@ -92,7 +114,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           onStatsUpdate({ nodeCount, timeMs });
         }
 
-        renderTree(rootData);
         setLoading(false);
       })
       .catch((err) => {
@@ -113,13 +134,47 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     };
   }, [target, algo, mode, maxRecipes]);
 
+  // Separate effect for rendering the tree
+  useEffect(() => {
+    if (ref.current && treeData && !renderAttempted) {
+      renderTree(treeData);
+      setRenderAttempted(true);
+    }
+  }, [treeData, renderAttempted]);
+
+  // Add window resize listener to redraw the tree
+  useEffect(() => {
+    const handleResize = () => {
+      if (treeData) {
+        renderTree(treeData);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [treeData]);
+
   const createMultipleRecipeTree = (roots, targetName) => {
+    // Validate all roots have the required structure
+    const validRoots = roots.filter(root => {
+      return root && (root.Root === targetName || root.root === targetName);
+    });
+    
+    if (validRoots.length === 0) {
+      console.warn("No valid roots found in response");
+      return null;
+    }
+    
     // Create a parent node that contains all recipe trees
     return {
       root: targetName,
       Root: targetName,
       isMultipleRoot: true,
-      children: roots
+      children: validRoots
     };
   };
 
