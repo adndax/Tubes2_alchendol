@@ -1,6 +1,7 @@
 "use client";
+import { Suspense } from "react";  // Make sure this import is present
 import { useState, useMemo } from "react";
-import { useSearchParams } from "next/navigation"; // ⬅️ Tambahkan ini
+import { useSearchParams } from "next/navigation";
 import { Heading, Paragraph } from "@/components/Typography";
 import RecipeToggle from "@/components/Toggle";
 import { PrimaryButton } from "@/components/Button";
@@ -8,7 +9,7 @@ import SearchBar from "@/components/SearchBar";
 import { ElementBox } from "@/components/BorderBox";
 import { elements } from "@data";
 
-export default function ShortestRecipe() {
+function ShortestRecipeContent() {
   const searchParams = useSearchParams();
   const algo = searchParams.get("algo") || "null"; // ⬅️ Ambil dari query param
 
@@ -83,5 +84,13 @@ export default function ShortestRecipe() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function ShortestRecipe() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ShortestRecipeContent />
+    </Suspense>
   );
 }
