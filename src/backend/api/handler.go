@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
     "fmt"
+    "time"
 
 	"github.com/gin-gonic/gin"
 	"Tubes2_alchendol/search"
@@ -38,11 +39,11 @@ func SearchHandler(c *gin.Context) {
     maxRecipesStr := c.Query("maxRecipes")
 
     // Debug logging
-    println("Received parameters:")
-    println("algo:", algo)
-    println("target:", target)
-    println("multiple:", multipleStr)
-    println("maxRecipes:", maxRecipesStr)
+    fmt.Println("Received parameters:")
+    fmt.Println("algo:", algo)
+    fmt.Println("target:", target)
+    fmt.Println("multiple:", multipleStr)
+    fmt.Println("maxRecipes:", maxRecipesStr)
 
     if target == "" {
         c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
@@ -76,60 +77,108 @@ func SearchHandler(c *gin.Context) {
     if maxRecipesStr != "" {
         if max, err := strconv.Atoi(maxRecipesStr); err == nil {
             maxRecipes = max
+            // Safety cap for maxRecipes
+            if maxRecipes > 100 {
+                maxRecipes = 100
+            }
         }
     }
 
-    println("Using multiple:", multiple)
-    println("Max recipes:", maxRecipes)
+    fmt.Println("Using multiple:", multiple)
+    fmt.Println("Max recipes:", maxRecipes)
+
+    // Use a channel and timeout to handle potential slow or hanging requests
+    resultChan := make(chan map[string]interface{}, 1)
+    errChan := make(chan error, 1)
+    
+    // Start a timeout to prevent hanging requests
+    timeout := time.After(10 * time.Second)
 
     switch algo {
     case "DFS":
         if multiple {
-            // Multiple DFS
-            recipes, timeElapsed, nodesVisited := search.MultipleDFS(target, elements, maxRecipes)
-            
-            // Debug: Check what we got back
-            fmt.Printf("DEBUG: MultipleDFS returned %d recipes for %s (maxRecipes=%d)\n", 
-                len(recipes), target, maxRecipes)
+            // Multiple DFS in a separate goroutine
+            go func() {
+                defer func() {
+                    // Recover from any panics to prevent the server from crashing
+                    if r := recover(); r != nil {
+                        errChan <- fmt.Errorf("Recovered from panic in MultipleDFS: %v", r)
+                    }
+                }()
                 
-            appendRecipes := map[string] interface{}{
-                "nodesVisited": nodesVisited,
-                "roots": recipes,
-                "timeElapsed": timeElapsed,
+                recipes, timeElapsed, nodesVisited := search.MultipleDFS(target, elements, maxRecipes)
                 
-            }
+                fmt.Printf("MultipleDFS returned %d recipes for %s (maxRecipes=%d)\n", 
+                    len(recipes), target, maxRecipes)
                 
-            // Use same format as single DFS
-            response := gin.H{
-                "nodesVisited": appendRecipes["nodesVisited"],
-                "roots": appendRecipes["roots"],
-                "timeElapsed": appendRecipes["timeElapsed"],
+                response := map[string]interface{}{
+                    "nodesVisited": nodesVisited,
+                    "roots": recipes,
+                    "timeElapsed": timeElapsed,
+                }
+                
+                resultChan <- response
+            }()
+            
+            // Wait for result or timeout
+            select {
+            case result := <-resultChan:
+                // Format and send the response
+                c.Header("Content-Type", "application/json")
+                prettyJSON, err := json.MarshalIndent(result, "", "    ")
+                if err != nil {
+                    c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                    return
+                }
+                c.Writer.Write(prettyJSON)
+                
+            case err := <-errChan:
+                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+                
+            case <-timeout:
+                c.JSON(http.StatusRequestTimeout, gin.H{
+                    "error": "Waktu pencarian habis. Element terlalu kompleks atau search tree terlalu besar.",
+                    "suggestion": "Coba element lain atau kurangi maxRecipes."})
             }
             
-            c.Header("Content-Type", "application/json")
-            prettyJSON, err := json.MarshalIndent(response, "", "    ")
-            if err != nil {
-                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-                return
-            }
-            c.Writer.Write(prettyJSON)
-        }else {
-            // Single DFS (remains the same)
-            recipeTree, timeElapsed, nodesVisited := search.DFS(target, elements)
+        } else {
+            // Single DFS in a separate goroutine
+            go func() {
+                defer func() {
+                    if r := recover(); r != nil {
+                        errChan <- fmt.Errorf("Recovered from panic in DFS: %v", r)
+                    }
+                }()
+                
+                recipeTree, timeElapsed, nodesVisited := search.DFS(target, elements)
+                
+                response := map[string]interface{}{
+                    "nodesVisited": nodesVisited,
+                    "root": recipeTree,
+                    "timeElapsed": timeElapsed,
+                }
+                
+                resultChan <- response
+            }()
             
-            response := gin.H{
-                "nodesVisited": nodesVisited,
-                "root": recipeTree,
-                "timeElapsed": timeElapsed,
+            // Wait for result or timeout
+            select {
+            case result := <-resultChan:
+                c.Header("Content-Type", "application/json")
+                prettyJSON, err := json.MarshalIndent(result, "", "    ")
+                if err != nil {
+                    c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                    return
+                }
+                c.Writer.Write(prettyJSON)
+                
+            case err := <-errChan:
+                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+                
+            case <-timeout:
+                c.JSON(http.StatusRequestTimeout, gin.H{
+                    "error": "Waktu pencarian habis. Element terlalu kompleks atau search tree terlalu besar."})
             }
-            
-            c.Header("Content-Type", "application/json")
-            prettyJSON, err := json.MarshalIndent(response, "", "    ")
-            if err != nil {
-                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-                return
-            }
-            c.Writer.Write(prettyJSON)
         }
     
     case "BFS":
@@ -142,28 +191,48 @@ func SearchHandler(c *gin.Context) {
             c.JSON(http.StatusNotImplemented, gin.H{"error": "BFS belum diimplementasi"})
         }
     
-    case "bidirectional", "Bidirectional":
+    case "bidirectional", "Bidirectional", "BIDIRECTIONAL":
         if multiple {
             // Multiple Bidirectional - to be implemented
             c.JSON(http.StatusNotImplemented, gin.H{"error": "Multiple Bidirectional belum diimplementasi"})
         } else {
-            // Single Bidirectional
-            recipeTree, timeElapsed, nodesVisited := search.BidirectionalSearch(target, elements)
+            // Single Bidirectional in a separate goroutine
+            go func() {
+                defer func() {
+                    if r := recover(); r != nil {
+                        errChan <- fmt.Errorf("Recovered from panic in BidirectionalSearch: %v", r)
+                    }
+                }()
+                
+                recipeTree, timeElapsed, nodesVisited := search.BidirectionalSearch(target, elements)
+                
+                response := map[string]interface{}{
+                    "nodesVisited": nodesVisited,
+                    "root": recipeTree,
+                    "timeElapsed": timeElapsed,
+                }
+                
+                resultChan <- response
+            }()
             
-            // Format response with single root
-            response := gin.H{
-                "nodesVisited": nodesVisited,
-                "root": recipeTree,
-                "timeElapsed": timeElapsed,
+            // Wait for result or timeout
+            select {
+            case result := <-resultChan:
+                c.Header("Content-Type", "application/json")
+                prettyJSON, err := json.MarshalIndent(result, "", "    ")
+                if err != nil {
+                    c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                    return
+                }
+                c.Writer.Write(prettyJSON)
+                
+            case err := <-errChan:
+                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+                
+            case <-timeout:
+                c.JSON(http.StatusRequestTimeout, gin.H{
+                    "error": "Waktu pencarian habis. Element terlalu kompleks atau search tree terlalu besar."})
             }
-            
-            c.Header("Content-Type", "application/json")
-            prettyJSON, err := json.MarshalIndent(response, "", "    ")
-            if err != nil {
-                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-                return
-            }
-            c.Writer.Write(prettyJSON)
         }
 
     default:
