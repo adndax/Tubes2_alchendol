@@ -318,20 +318,14 @@ func buildRecipeTreeHelper(element string, visited map[string]bool, forwardPath,
 	return recipeTree
 }
 
-// createRecipeMap builds the recipe map from the element list
 func createRecipeMap(elements []models.Element) map[string][][]string {
-	recipeMap := make(map[string][][]string)
-	
-	for _, element := range elements {
-		// Handle elements with recipes
-		if len(element.Recipes) == 2 {
-			// Add to recipe map
-			if _, exists := recipeMap[element.Name]; !exists {
-				recipeMap[element.Name] = make([][]string, 0)
-			}
-			recipeMap[element.Name] = append(recipeMap[element.Name], element.Recipes)
-		}
-	}
-	
-	return recipeMap
+    recipeMap := make(map[string][][]string)
+    
+    for _, element := range elements {
+        if len(element.Recipes) == 2 {
+            recipeMap[element.Name] = append(recipeMap[element.Name], element.Recipes)
+        }
+    }
+    
+    return recipeMap
 }
