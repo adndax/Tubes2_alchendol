@@ -44,8 +44,21 @@ type Node struct {
 	Tier    int
 }
 
-func IsBasicElement(element Element) bool {
-    return element.Tier == 0
+type MultipleSearchResult struct {
+	RecipeTrees  []RecipeTree
+	TimeElapsed  float64
+	NodesVisited int
+	FoundCount   int
+}
+
+// Check if element is a basic element
+
+func IsBasicElement(elementName string) bool {
+    return elementName == "Air" || elementName == "Earth" || elementName == "Fire" || 
+    elementName == "Water" || elementName == "Clock" || elementName == "Death" || 
+    elementName == "Dinosaur" || elementName == "Family Tree" || elementName == "Peat" || 
+    elementName == "Skeleton" || elementName == "Sloth" || elementName == "Tree" 
+
 }
 
 func IsBasicElementByName(name string, elements []Element) bool {
