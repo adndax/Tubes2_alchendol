@@ -12,7 +12,9 @@ import (
 // MultipleDFS searches for multiple recipes using concurrent DFS with multithreading
 func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]models.RecipeTree, float64, int) {
 	// Cap maximum recipes at 50
-
+	if maxRecipes > 50 {
+		maxRecipes = 50
+	}
 	
 	startTime := time.Now()
 	

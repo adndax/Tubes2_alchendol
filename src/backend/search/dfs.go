@@ -41,7 +41,7 @@ func IsBasicElement(elementName string) bool {
 
 // Add basic elements to the element map
 func AddBasicElements(elementMap map[string][]models.Element) {
-	basicElements := []string{"Air", "Earth", "Fire", "Water"}
+	basicElements := []string{"Air", "Earth", "Fire", "Water", "Clock", "Death", "Dinosaur", "Family Tree", "Peat", "Skeleton", "Sloth", "Tree"}
 	for _, name := range basicElements {
 		// Only add if not already present
 		if _, exists := elementMap[name]; !exists {
