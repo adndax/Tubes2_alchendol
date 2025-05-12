@@ -20,6 +20,24 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	
 	startTime := time.Now()
 	
+	// Determine timeout based on element complexity
+	timeoutDuration := 15 * time.Second // Default from your original code
+	for _, el := range elements {
+		if el.Name == target {
+			// Complex elements get more time based on tier
+			if el.Tier > 5 {
+				timeoutDuration = 60 * time.Second
+			} else if el.Tier > 3 {
+				timeoutDuration = 30 * time.Second
+			}
+			break
+		}
+	}
+	
+	// Create a context for coordinated cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
+	defer cancel()
+	
 	// Filter elements based on tier constraint 
 	elementMap, targetFound := CreateFilteredElementMap(elements, target)
 	if !targetFound {
@@ -43,7 +61,7 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		return []models.RecipeTree{basicTree}, time.Since(startTime).Seconds(), 1
 	}
 	
-	// Track results and nodes visited
+	// Track results and nodes visited - KEEPING EXACTLY AS IN ORIGINAL
 	var results []models.RecipeTree
 	var uniqueRecipes = make(map[string]bool)
 	var totalNodesVisited int32 = 0 // Akan diinkremen di setiap langkah pencarian
@@ -65,24 +83,20 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	// Create a channel for reporting nodes visited
 	visitedChannel := make(chan int, 100)
 	
-	// Create a context for coordinated cancellation
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	
 	// Signal channel for early termination
 	done := make(chan struct{})
 	
 	// Worker counter
 	var waitGroup sync.WaitGroup
 	
-	// Start a goroutine to collect node visit counts
+	// Start a goroutine to collect node visit counts - EXACTLY AS ORIGINAL
 	go func() {
 		for count := range visitedChannel {
 			atomic.AddInt32(&totalNodesVisited, int32(count))
 		}
 	}()
 	
-	// Start a collector goroutine to process the trees
+	// Start a collector goroutine to process the trees - EXACTLY AS ORIGINAL
 	go func() {
 		for tree := range treeChannel {
 			if tree.Root == "" {
@@ -166,6 +180,18 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	
 	// Process each direct combination
 	for i, combo := range directCombinations {
+		// Check for early termination or timeout
+		select {
+		case <-done:
+			fmt.Printf("Found all %d requested recipes, skipping additional combinations\n", maxRecipes)
+			goto ProcessComplete
+		case <-ctx.Done():
+			fmt.Println("Context timeout reached, using results gathered so far")
+			goto ProcessComplete
+		default:
+			// Continue processing
+		}
+		
 		waitGroup.Add(1)
 		
 		go func(index int, c1, c2 string) {
@@ -218,6 +244,25 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		fmt.Printf("Found all %d requested recipes\n", maxRecipes)
 	}
 	
+ProcessComplete:
+	// Wait up to 5 seconds for workers to complete, then return what we've got
+	cleanupTimeout := time.After(5 * time.Second)
+	select {
+	case <-func() chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			waitGroup.Wait()
+			close(done)
+		}()
+		return done
+	}():
+		fmt.Println("All workers completed normally")
+	case <-cleanupTimeout:
+		fmt.Println("Some workers still running, proceeding with results collected so far")
+	case <-ctx.Done():
+		fmt.Println("Main context timeout, returning available results")
+	}
+	
 	// Debug output if enabled
 	if os.Getenv("DEBUG_RECIPES") == "1" && len(results) > 1 {
 		DebugDisplayRecipeDifferences(results)
@@ -236,7 +281,7 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	return results, time.Since(startTime).Seconds(), int(finalNodesVisited)
 }
 
-// Modifikasi function exploreAlternativeTrees untuk menerima visitedChannel
+// Modifikasi function exploreAlternativeTrees untuk menerima visitedChannel - KEEPING AS ORIGINAL
 func exploreAlternativeTrees(target, comp1, comp2 string, elementMap map[string][]models.Element, 
 	treeChannel chan<- models.RecipeTree, visitedChannel chan<- int, ctx context.Context, done <-chan struct{}) {
 	
@@ -399,7 +444,7 @@ func exploreAlternativeTrees(target, comp1, comp2 string, elementMap map[string]
 	}
 }
 
-// Modifikasi function exploreComponentCombinations untuk menerima visitedChannel
+// Modifikasi function exploreComponentCombinations untuk menerima visitedChannel - KEEPING AS ORIGINAL
 func exploreComponentCombinations(component string, elementMap map[string][]models.Element, 
 	visitedChannel chan<- int, callback func(models.RecipeTree)) {
 	
@@ -497,7 +542,7 @@ func exploreComponentCombinations(component string, elementMap map[string][]mode
 	}
 }
 
-// Helper function to generate a more detailed key for a tree
+// Helper function to generate a more detailed key for a tree - KEEPING AS ORIGINAL
 func generateCompleteTreeKey(tree models.RecipeTree) string {
 	var sb strings.Builder
 	generateCompleteTreeKeyHelper(tree, &sb, 0)
