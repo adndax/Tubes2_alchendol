@@ -31,9 +31,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   useEffect(() => {
     if (!target) return;
 
-    setLoading(true);
-    setError(null);
-    
     // Clear previous timeout if exists
     if (timeoutId) {
       clearTimeout(timeoutId);
@@ -45,9 +42,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     setTreeData(null);
     setRenderAttempted(false);
 
-    // Create an AbortController for this request
-    const abortController = new AbortController();
-    
     const formattedAlgo = algo.toUpperCase() === "BIDIRECTIONAL" ? "bidirectional" : algo.toUpperCase();
     
     // Build the correct URL with all parameters
@@ -66,9 +60,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     
     // Set client-side timeout
     const fetchTimeoutId = setTimeout(() => {
-      // Abort the request when timeout is reached
-      abortController.abort();
-
       setLoading(false);
       setError(`Request timed out after ${timeoutDuration/1000} seconds. The server might be busy or the element "${target}" might be too complex to process.`);
       
@@ -79,14 +70,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     
     setTimeoutId(fetchTimeoutId);
     
-    fetch(url, { 
-      signal: abortController.signal, 
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      }
-    })
+    fetch(url)
       .then((res) => {
         // Clear the timeout when we get a response
         clearTimeout(fetchTimeoutId);
@@ -160,7 +144,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      abortController.abort();
     };
   }, [target, algo, mode, maxRecipes]);
 

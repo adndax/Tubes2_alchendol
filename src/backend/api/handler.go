@@ -8,7 +8,6 @@ import (
 	"strings"
     "fmt"
     "time"
-    "context"
 
 	"github.com/gin-gonic/gin"
 	"Tubes2_alchendol/search"
@@ -32,10 +31,6 @@ func LoadRecipeData() ([]models.Element, error) {
 }
 
 func SearchHandler(c *gin.Context) {
-    // Add request ID for tracking
-    requestID := fmt.Sprintf("%d", time.Now().UnixNano())
-    fmt.Printf("[%s] Starting request processing\n", requestID)
-
     // Get parameters that match frontend expectations
     algo := c.Query("algo")
     target := strings.TrimSpace(c.Query("target"))
@@ -102,81 +97,50 @@ func SearchHandler(c *gin.Context) {
     switch algo {
     case "DFS":
         if multiple {
-            fmt.Printf("[%s] Starting MultipleDFS with maxRecipes=%d\n", requestID, maxRecipes)
-
-            // Use a context with timeout for the goroutine
-            ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
-            defer cancel()
-            
             // Multiple DFS in a separate goroutine
             go func() {
                 defer func() {
+                    // Recover from any panics to prevent the server from crashing
                     if r := recover(); r != nil {
-                        fmt.Printf("[%s] Recovered from panic: %v\n", requestID, r)
-                        select {
-                        case errChan <- fmt.Errorf("Recovered from panic in MultipleDFS: %v", r):
-                        case <-ctx.Done():
-                            fmt.Printf("[%s] Context done while sending error\n", requestID)
-                        }
+                        errChan <- fmt.Errorf("Recovered from panic in MultipleDFS: %v", r)
                     }
                 }()
                 
-                fmt.Printf("[%s] Starting MultipleDFS\n", requestID)
                 recipes, timeElapsed, nodesVisited := search.MultipleDFS(target, elements, maxRecipes)
                 
-                fmt.Printf("[%s] MultipleDFS completed with %d recipes\n", requestID, len(recipes))
+                fmt.Printf("MultipleDFS returned %d recipes for %s (maxRecipes=%d)\n", 
+                    len(recipes), target, maxRecipes)
                 
-                // Always send a response, even if no recipes found
                 response := map[string]interface{}{
                     "nodesVisited": nodesVisited,
                     "roots": recipes,
                     "timeElapsed": timeElapsed,
-                    "requestId": requestID,
-                    "recipesCount": len(recipes),
-                    "maxRequested": maxRecipes,
-                    "isComplete": true,
                 }
                 
-                select {
-                case resultChan <- response:
-                    fmt.Printf("[%s] Sent response to channel\n", requestID)
-                case <-ctx.Done():
-                    fmt.Printf("[%s] Context done while sending result\n", requestID)
-                }
+                resultChan <- response
             }()
             
             // Wait for result or timeout
             select {
             case result := <-resultChan:
-                fmt.Printf("[%s] Received result, sending to client\n", requestID)
+                // Format and send the response
                 c.Header("Content-Type", "application/json")
-                c.Header("Cache-Control", "no-store, no-cache")
-                c.Header("X-Request-ID", requestID)
-                c.JSON(http.StatusOK, result)
+                prettyJSON, err := json.MarshalIndent(result, "", "    ")
+                if err != nil {
+                    c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                    return
+                }
+                c.Writer.Write(prettyJSON)
                 
             case err := <-errChan:
-                fmt.Printf("[%s] Received error: %v\n", requestID, err)
-                c.Header("Cache-Control", "no-store, no-cache")
-                c.Header("X-Request-ID", requestID)
-                c.JSON(http.StatusInternalServerError, gin.H{
-                    "error": err.Error(),
-                    "requestId": requestID,
-                    "isComplete": true,
-                })
+                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
                 
             case <-timeout:
-                fmt.Printf("[%s] Request timed out\n", requestID)
-                c.Header("Cache-Control", "no-store, no-cache")
-                c.Header("X-Request-ID", requestID)
                 c.JSON(http.StatusRequestTimeout, gin.H{
                     "error": "Waktu pencarian habis. Element terlalu kompleks atau search tree terlalu besar.",
-                    "suggestion": "Coba element lain atau kurangi maxRecipes.",
-                    "requestId": requestID,
-                    "isComplete": true,
-                })
+                    "suggestion": "Coba element lain atau kurangi maxRecipes."})
             }
             
-            fmt.Printf("[%s] Request handling complete\n", requestID)
         } else {
             // Single DFS in a separate goroutine
             go func() {
