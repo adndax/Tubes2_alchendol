@@ -486,13 +486,20 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
 
   if (error) {
     return (
-      <div className="flex flex-col justify-center items-center h-64">
-        <div className="text-red-500 text-lg">Error: {error}</div>
-        <div className="mt-4 text-sm">
-          <p>Make sure the backend server is running:</p>
-          <code className="bg-gray-100 p-2 rounded">cd backend && go run main.go</code>
-          <p className="mt-2">Try a less complex element or reduce maxRecipes if the search times out.</p>
+      <div className="flex flex-col justify-center items-center h-64 p-4 rounded-lg shadow-md" style={{ backgroundColor: '#2A0026' }}>
+        <h2 className="text-xl font-semibold mb-2" style={{ color: '#FFE1A8' }}>An error occurred</h2>
+        <p className="mb-4" style={{ color: '#ffffff' }}>
+          Details: <span style={{ color: '#A6352B' }}>{error}</span>
+        </p>
+        <div className="p-3 rounded-md w-full" style={{ backgroundColor: '#7d2820' }}>
+          <p className="mb-2" style={{ color: '#FFE1A8' }}>Ensure the backend server is running:</p>
+          <code className="block p-2 rounded-md" style={{ backgroundColor: '#A6352B', color: '#ffffff' }}>
+            cd backend && go run main.go
+          </code>
         </div>
+        <p className="text-s mt-3" style={{ color: '#FFE1A8' }}>
+          If the search times out, try a simpler query or reduce <code style={{ color: '#A6352B' }}>maxRecipes</code>.
+        </p>
       </div>
     );
   }
