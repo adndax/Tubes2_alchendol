@@ -110,7 +110,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         setTreeData(rootData);
 
         if (onStatsUpdate) {
-          const timeMs = Math.round((data.timeElapsed || 0) * 1000);
+            const timeMs = data.timeElapsed || 0;
           onStatsUpdate({ nodeCount, timeMs });
         }
 

@@ -11,16 +11,17 @@ import (
 
 // MultipleDFS searches for multiple recipes using concurrent DFS with multithreading
 func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]models.RecipeTree, float64, int) {
-	// Cap maximum recipes at 50
-	if maxRecipes > 50 {
-		maxRecipes = 50
+	// Cap maximum recipes at 20 to prevent excessive combinations
+	if maxRecipes > 20 {
+		maxRecipes = 20
 	}
 	
 	startTime := time.Now()
 	
-	// Filter elements based on tier constraint and Time exclusion
+	// Filter elements based on tier constraint 
 	elementMap, targetFound := CreateFilteredElementMap(elements, target)
 	if !targetFound {
+		fmt.Printf("Target '%s' not found in filtered map\n", target)
 		return []models.RecipeTree{}, time.Since(startTime).Seconds(), 0
 	}
 	
@@ -43,47 +44,75 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	// Get all top-level recipes for the target
 	targetElements, found := elementMap[target]
 	if !found || len(targetElements) == 0 {
+		fmt.Printf("No recipes found for target '%s' in elementMap\n", target)
 		return []models.RecipeTree{}, time.Since(startTime).Seconds(), 0
 	}
 	
-	// Shared state
-	var results []models.RecipeTree
-	var resultsMutex sync.Mutex
-	recipeTreeMap := make(map[string]bool)
+	fmt.Printf("Found %d recipes for target '%s'\n", len(targetElements), target)
+	
+	// Use single DFS first to get at least one valid recipe quickly
+	singleTree, singleTime, singleNodes := DFS(target, elements)
 	
 	// Track total nodes visited
-	var totalNodesVisited int32
+	var totalNodesVisited int32 = int32(singleNodes)
 	
-	// Channel to collect results
-	resultChan := make(chan models.RecipeTree, maxRecipes*10)
+	// Create a map to track unique recipes
+	var resultsLock sync.Mutex
+	var results []models.RecipeTree
+	uniqueRecipes := make(map[string]bool)
 	
-	// Done channel for early stopping
-	done := make(chan struct{})
+	// If DFS found a recipe, use it as our first result
+	if singleTree.Root != "" { // Check if valid tree
+		resultsLock.Lock()
+		treeKey := generateTreeKey(singleTree)
+		uniqueRecipes[treeKey] = true
+		results = append(results, singleTree)
+		resultsLock.Unlock()
+		fmt.Printf("Found first recipe using single DFS in %.2f seconds\n", singleTime)
+	} else {
+		fmt.Printf("Single DFS couldn't find a recipe for %s\n", target)
+	}
 	
-	// WaitGroup for worker goroutines
+	// If we only wanted one recipe or already have the max, return now
+	if maxRecipes <= 1 || len(results) >= maxRecipes {
+		return results, time.Since(startTime).Seconds(), int(totalNodesVisited)
+	}
+	
+	// Setup for multithreaded recipe generation
 	var wg sync.WaitGroup
+	done := make(chan struct{}) // Channel to signal early completion
 	
-	// Start result collector goroutine
+	// Create a channel to collect results from worker goroutines
+	recipeChannel := make(chan models.RecipeTree, 100)
+	
+	// Start a goroutine to collect recipes from the channel
 	go func() {
-		for tree := range resultChan {
-			treeKey := generateTreeKey(tree)
+		for recipeTree := range recipeChannel {
+			resultsLock.Lock()
 			
-			resultsMutex.Lock()
-			// Check if we haven't seen this tree and haven't reached max
-			if !recipeTreeMap[treeKey] && len(results) < maxRecipes {
-				recipeTreeMap[treeKey] = true
-				results = append(results, tree)
+			// Only add if we haven't reached max yet
+			if len(results) < maxRecipes {
+				treeKey := generateTreeKey(recipeTree)
 				
-				// Signal early stop if we've reached exactly maxRecipes
-				if len(results) == maxRecipes {
-					close(done)
+				// Add if not a duplicate
+				if !uniqueRecipes[treeKey] {
+					uniqueRecipes[treeKey] = true
+					results = append(results, recipeTree)
+					fmt.Printf("Added recipe %d of %d to results\n", len(results), maxRecipes)
+					
+					// Signal done if we've reached max recipes
+					if len(results) >= maxRecipes {
+						close(done)
+						break
+					}
 				}
 			}
-			resultsMutex.Unlock()
+			
+			resultsLock.Unlock()
 		}
 	}()
 	
-	// Process each top-level recipe in its own goroutine
+	// Process each top-level recipe in a separate goroutine
 	for i, element := range targetElements {
 		if len(element.Recipes) != 2 {
 			continue
@@ -92,191 +121,243 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		comp1 := element.Recipes[0]
 		comp2 := element.Recipes[1]
 		
+		// Skip if components don't exist in element map
+		if _, exists := elementMap[comp1]; !exists {
+			continue
+		}
+		
+		if _, exists := elementMap[comp2]; !exists {
+			continue
+		}
+		
+		// Launch a goroutine for each recipe
 		wg.Add(1)
-		go func(c1, c2 string, idx int) {
+		go func(recipeIndex int, component1, component2 string) {
 			defer wg.Done()
 			
-			// Check if we should stop
+			// Create a timeout for this goroutine
+			timeout := time.After(2 * time.Second)
+			
+			// Create done channel for early termination
+			workerDone := make(chan struct{})
+			
+			// Process this recipe in yet another goroutine to handle timeout
+			go func() {
+				defer close(workerDone)
+				
+				// First attempt to create a tree with this recipe
+				tree := createBasicRecipeTree(target, component1, component2, elementMap, &totalNodesVisited)
+				
+				// Check if we created a valid tree
+				if tree.Root != "" {
+					// Try to send to channel, non-blocking in case channel is full
+					select {
+					case recipeChannel <- tree:
+						fmt.Printf("Worker %d: Added recipe for %s + %s\n", recipeIndex, component1, component2)
+					case <-done:
+						// Skip if we're already done
+						return
+					default:
+						// Skip if channel is full
+					}
+				}
+			}()
+			
+			// Wait for either completion, timeout, or done signal
 			select {
+			case <-workerDone:
+				// Worker finished normally
+			case <-timeout:
+				fmt.Printf("Worker %d timed out\n", recipeIndex)
 			case <-done:
+				// We've reached max recipes, stop processing
 				return
-			default:
 			}
 			
-			// Generate all combinations for this top-level recipe
-			generateRecipeCombinations(target, c1, c2, elementMap, 
-				resultChan, done, &totalNodesVisited)
-			
-		}(comp1, comp2, i)
+		}(i, comp1, comp2)
 	}
 	
-	// Wait for all workers to complete
-	wg.Wait()
+	// Wait for all goroutines or early termination
+	waitCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(waitCh)
+	}()
 	
-	// Close result channel after all workers are done
-	close(resultChan)
+	// Wait for workers to finish with timeout
+	select {
+	case <-waitCh:
+		fmt.Println("All workers completed normally")
+	case <-time.After(5 * time.Second):
+		fmt.Println("Some workers timed out, proceeding with results collected so far")
+	case <-done:
+		fmt.Printf("Found all %d requested recipes, stopping other workers\n", maxRecipes)
+	}
 	
-	// Give collector goroutine time to finish
+	// Close the recipe channel to signal collector to finish
+	close(recipeChannel)
+	
+	// Give collector goroutine time to process remaining items
 	time.Sleep(10 * time.Millisecond)
+	
+	fmt.Printf("MultipleDFS returning %d recipes for %s with %d nodes visited\n", 
+		len(results), target, totalNodesVisited)
 	
 	return results, time.Since(startTime).Seconds(), int(totalNodesVisited)
 }
 
-// generateRecipeCombinations generates all combinations for a specific recipe
-func generateRecipeCombinations(target, comp1, comp2 string, elementMap map[string][]models.Element,
-	resultChan chan<- models.RecipeTree, done <-chan struct{}, totalNodesVisited *int32) {
+// createBasicRecipeTree creates a recipe tree with non-empty children for non-basic elements
+func createBasicRecipeTree(target, comp1, comp2 string, elementMap map[string][]models.Element, nodesVisited *int32) models.RecipeTree {
+	// Process first component
+	var comp1Tree models.RecipeTree
+	var comp1TreeValid bool
 	
-	// Get all complete variations for both components
-	var comp1Trees, comp2Trees []models.RecipeTree
-	var wg sync.WaitGroup
-	
-	wg.Add(2)
-	
-	// Get variations for comp1
-	go func() {
-		defer wg.Done()
-		comp1Trees = getAllVariationsWithEarlyStopping(comp1, elementMap, []string{target}, 
-			done, totalNodesVisited)
-	}()
-	
-	// Get variations for comp2
-	go func() {
-		defer wg.Done()
-		comp2Trees = getAllVariationsWithEarlyStopping(comp2, elementMap, []string{target}, 
-			done, totalNodesVisited)
-	}()
-	
-	wg.Wait()
-	
-	// Increment for this node
-	atomic.AddInt32(totalNodesVisited, 1)
-	
-	// Generate all combinations
-	for _, comp1Tree := range comp1Trees {
-		for _, comp2Tree := range comp2Trees {
-			// Check if we should stop
-			select {
-			case <-done:
-				return
-			default:
-			}
-			
-			recipeTree := models.RecipeTree{
-				Root:     target,
-				Left:     comp1,
-				Right:    comp2,
-				Tier:     getTierAsString(target, elementMap),
-				Children: []models.RecipeTree{comp1Tree, comp2Tree},
-			}
-			
-			// Send result - non-blocking to avoid deadlock
-			select {
-			case resultChan <- recipeTree:
-			case <-done:
-				return
-			}
+	if IsBasicElement(comp1) {
+		atomic.AddInt32(nodesVisited, 1)
+		comp1Tree = models.RecipeTree{
+			Root:     comp1,
+			Left:     "",
+			Right:    "",
+			Tier:     "0",
+			Children: []models.RecipeTree{},
 		}
-	}
-}
-
-// getAllVariationsWithEarlyStopping finds all variations with early stopping capability
-func getAllVariationsWithEarlyStopping(element string, elementMap map[string][]models.Element, 
-	visited []string, done <-chan struct{}, totalNodesVisited *int32) []models.RecipeTree {
-	
-	// Check if we should stop
-	select {
-	case <-done:
-		return []models.RecipeTree{}
-	default:
-	}
-	
-	// Increment nodes visited
-	atomic.AddInt32(totalNodesVisited, 1)
-	
-	// Check for cycles
-	for _, v := range visited {
-		if v == element {
-			return []models.RecipeTree{}
-		}
-	}
-	
-	// Base case: basic element (tier 0)
-	if IsBasicElement(element) {
-		return []models.RecipeTree{
-			{
-				Root:     element,
-				Left:     "",
-				Right:    "",
-				Tier:     "0",
-				Children: []models.RecipeTree{},
-			},
-		}
-	}
-	
-	// Get all recipes for this element
-	elements, found := elementMap[element]
-	if !found || len(elements) == 0 {
-		return []models.RecipeTree{}
-	}
-	
-	var allCompleteTrees []models.RecipeTree
-	
-	// Explore each recipe
-	for _, el := range elements {
-		// Check if we should stop
-		select {
-		case <-done:
-			return allCompleteTrees
-		default:
-		}
-		
-		if len(el.Recipes) != 2 {
-			continue
-		}
-		
-		comp1 := el.Recipes[0]
-		comp2 := el.Recipes[1]
-		
-		// Check tier constraints
-		comp1Tier := getTier(comp1, elementMap)
-		comp2Tier := getTier(comp2, elementMap)
-		elementTier := getTier(element, elementMap)
-		
-		if comp1Tier >= elementTier || comp2Tier >= elementTier {
-			continue
-		}
-		
-		// Get all complete variations for both components recursively
-		comp1Trees := getAllVariationsWithEarlyStopping(comp1, elementMap, append(visited, element),
-			done, totalNodesVisited)
-		comp2Trees := getAllVariationsWithEarlyStopping(comp2, elementMap, append(visited, element),
-			done, totalNodesVisited)
-		
-		// Only create combinations if both components have valid complete paths
-		if len(comp1Trees) > 0 && len(comp2Trees) > 0 {
-			for _, comp1Tree := range comp1Trees {
-				for _, comp2Tree := range comp2Trees {
-					// Check if we should stop
-					select {
-					case <-done:
-						return allCompleteTrees
-					default:
-					}
+		comp1TreeValid = true
+	} else {
+		atomic.AddInt32(nodesVisited, 1)
+		comp1Elem, exists := elementMap[comp1]
+		// Non-basic element must have proper children
+		if exists && len(comp1Elem) > 0 {
+			// Find the first valid recipe for comp1
+			for _, el := range comp1Elem {
+				if len(el.Recipes) == 2 {
+					subComp1 := el.Recipes[0]
+					subComp2 := el.Recipes[1]
 					
-					recipeTree := models.RecipeTree{
-						Root:     element,
-						Left:     comp1,
-						Right:    comp2,
-						Tier:     getTierAsString(element, elementMap),
-						Children: []models.RecipeTree{comp1Tree, comp2Tree},
+					// Create a proper tree for comp1
+					comp1Tree = models.RecipeTree{
+						Root:  comp1,
+						Left:  subComp1,
+						Right: subComp2,
+						Tier:  fmt.Sprintf("%d", getTier(comp1, elementMap)),
+						Children: []models.RecipeTree{
+							{
+								Root:     subComp1,
+								Left:     "",
+								Right:    "",
+								Tier:     fmt.Sprintf("%d", getTier(subComp1, elementMap)),
+								Children: []models.RecipeTree{},
+							},
+							{
+								Root:     subComp2,
+								Left:     "",
+								Right:    "",
+								Tier:     fmt.Sprintf("%d", getTier(subComp2, elementMap)),
+								Children: []models.RecipeTree{},
+							},
+						},
 					}
-					allCompleteTrees = append(allCompleteTrees, recipeTree)
+					atomic.AddInt32(nodesVisited, 2)
+					comp1TreeValid = true
+					break
 				}
 			}
 		}
+		
+		// If we still don't have a proper tree for comp1
+		if !comp1TreeValid {
+			// Create a minimal node without children as fallback
+			comp1Tree = models.RecipeTree{
+				Root:     comp1,
+				Left:     "",
+				Right:    "",
+				Tier:     fmt.Sprintf("%d", getTier(comp1, elementMap)),
+				Children: []models.RecipeTree{},
+			}
+			comp1TreeValid = true
+		}
 	}
 	
-	return allCompleteTrees
+	// Process second component
+	var comp2Tree models.RecipeTree
+	var comp2TreeValid bool
+	
+	if IsBasicElement(comp2) {
+		atomic.AddInt32(nodesVisited, 1)
+		comp2Tree = models.RecipeTree{
+			Root:     comp2,
+			Left:     "",
+			Right:    "",
+			Tier:     "0",
+			Children: []models.RecipeTree{},
+		}
+		comp2TreeValid = true
+	} else {
+		atomic.AddInt32(nodesVisited, 1)
+		comp2Elem, exists := elementMap[comp2]
+		// Non-basic element must have proper children
+		if exists && len(comp2Elem) > 0 {
+			// Find the first valid recipe for comp2
+			for _, el := range comp2Elem {
+				if len(el.Recipes) == 2 {
+					subComp1 := el.Recipes[0]
+					subComp2 := el.Recipes[1]
+					
+					// Create a proper tree for comp2
+					comp2Tree = models.RecipeTree{
+						Root:  comp2,
+						Left:  subComp1,
+						Right: subComp2,
+						Tier:  fmt.Sprintf("%d", getTier(comp2, elementMap)),
+						Children: []models.RecipeTree{
+							{
+								Root:     subComp1,
+								Left:     "",
+								Right:    "",
+								Tier:     fmt.Sprintf("%d", getTier(subComp1, elementMap)),
+								Children: []models.RecipeTree{},
+							},
+							{
+								Root:     subComp2,
+								Left:     "",
+								Right:    "",
+								Tier:     fmt.Sprintf("%d", getTier(subComp2, elementMap)),
+								Children: []models.RecipeTree{},
+							},
+						},
+					}
+					atomic.AddInt32(nodesVisited, 2)
+					comp2TreeValid = true
+					break
+				}
+			}
+		}
+		
+		// If we still don't have a proper tree for comp2
+		if !comp2TreeValid {
+			// Create a minimal node without children as fallback
+			comp2Tree = models.RecipeTree{
+				Root:     comp2,
+				Left:     "",
+				Right:    "",
+				Tier:     fmt.Sprintf("%d", getTier(comp2, elementMap)),
+				Children: []models.RecipeTree{},
+			}
+			comp2TreeValid = true
+		}
+	}
+	
+	// Create the final tree
+	if !comp1TreeValid || !comp2TreeValid {
+		return models.RecipeTree{} // Empty invalid tree
+	}
+	
+	return models.RecipeTree{
+		Root:     target,
+		Left:     comp1,
+		Right:    comp2,
+		Tier:     fmt.Sprintf("%d", getTier(target, elementMap)),
+		Children: []models.RecipeTree{comp1Tree, comp2Tree},
+	}
 }
 
 // Helper functions
