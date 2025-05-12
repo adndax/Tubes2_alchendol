@@ -1,5 +1,6 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { Suspense } from "react";  // Make sure this import is present
+import { useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Heading, Paragraph } from "@/components/Typography";
 import RecipeToggle from "@/components/Toggle";
@@ -8,7 +9,7 @@ import SearchBar from "@/components/SearchBar";
 import { ElementBox } from "@/components/BorderBox";
 import { elements } from "@data";
 
-export default function MultipleRecipes() {
+function MultipleRecipesContent() {
   const searchParams = useSearchParams();
   const algo = searchParams.get("algo") || "null";
   
@@ -31,7 +32,7 @@ export default function MultipleRecipes() {
   const currentElements = useMemo(() => {
     const start = (page - 1) * itemsPerPage;
     return filteredElements.slice(start, start + itemsPerPage);
-  }, [page, filteredElements]);
+  }, [page, filteredElements, itemsPerPage]);
 
   const handleSearch = (query) => {
     setSearchQuery(query);
@@ -42,11 +43,11 @@ export default function MultipleRecipes() {
     <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
       <div className="flex flex-col items-center pt-20 gap-15 w-full pb-20">
         <div className="flex flex-col gap-2 items-center">
-        <Heading>
-          {algo !== "null"
-            ? `You Picked the ${algo.toUpperCase()} Spell!`
-            : "Pick Your Quest Mode"}
-        </Heading>
+          <Heading>
+            {algo !== "null"
+              ? `You Picked the ${algo.toUpperCase()} Spell!`
+              : "Pick Your Quest Mode"}
+          </Heading>
           <Paragraph>
             Now… do you want a fast recipe or a magical recipe hunt?
           </Paragraph>
@@ -84,5 +85,13 @@ export default function MultipleRecipes() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function MultipleRecipes() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <MultipleRecipesContent />
+    </Suspense>
   );
 }

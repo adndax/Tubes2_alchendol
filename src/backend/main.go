@@ -1,9 +1,10 @@
 package main
 
 import (
-    "encoding/json"
     "fmt"
     "os"
+    "encoding/json"
+    
     "github.com/gin-gonic/gin"
     "github.com/gin-contrib/cors"
     
@@ -15,14 +16,23 @@ func main() {
     // Setup API Server
     r := gin.Default()
     
-    // Setup CORS untuk frontend
+    // Setup CORS with more permissive settings
     r.Use(cors.New(cors.Config{
-        AllowOrigins:     []string{"http://localhost:3000"},
-        AllowMethods:     []string{"GET", "POST"},
-        AllowHeaders:     []string{"Origin", "Content-Type"},
-        ExposeHeaders:    []string{"Content-Length"},
+        AllowOrigins:     []string{"http://localhost:3000", "http://127.0.0.1:3000"},
+        AllowMethods:     []string{"GET", "POST", "PUT", "OPTIONS"},
+        AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+        ExposeHeaders:    []string{"Content-Length", "Content-Type", "X-Request-ID"},
         AllowCredentials: true,
+        MaxAge:           86400, // 24 hours
     }))
+    
+    // Add a health check endpoint
+    r.GET("/health", func(c *gin.Context) {
+        c.JSON(200, gin.H{
+            "status": "ok",
+            "message": "Server is running",
+        })
+    })
     
     // Setup API routes
     r.GET("/api/search", api.SearchHandler)
@@ -31,8 +41,13 @@ func main() {
     if len(os.Args) > 1 && os.Args[1] == "--cli" {
         runCLI()
     } else {
-        // Run server jika tidak dalam mode CLI
-        r.Run(":8080")
+        // Run server on a specific host and port
+        port := os.Getenv("PORT")
+        if port == "" {
+            port = "8080"
+        }
+        fmt.Printf("Server starting on port %s...\n", port)
+        r.Run(":" + port)
     }
 }
 
