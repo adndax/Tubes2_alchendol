@@ -69,18 +69,21 @@ export default function ElementDetailPage() {
                 <div className="flex flex-col items-center gap-2">
                   <Subheading>How many recipes do you want to discover?</Subheading>
                   <div className="flex items-center gap-2">
-                    <QuantityInput 
-                      value={quantity} 
-                      onChange={(val) => {
-                        // Cap the max recipes at 20 to prevent browser slowdowns
-                        setQuantity(Math.min(val, 20));
-                      }} 
+                    <QuantityInput
+                      value={quantity}
+                      onChange={(val) => setQuantity(val)}
                     />
-                    {quantity > 10 && (
+                    
+                    {/* Use only one conditional with explicit priority */}
+                    {quantity >= 100 ? (
+                      <Paragraph className="text-red-500 text-xs ml-2 font-bold">
+                        OOH MY PCC! Are you sure you want to do this? 
+                      </Paragraph>
+                    ) : quantity > 10 ? (
                       <Paragraph className="text-red-500 text-xs ml-2">
                         Higher values may take longer to process
                       </Paragraph>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </>
