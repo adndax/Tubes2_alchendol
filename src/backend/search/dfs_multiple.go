@@ -50,27 +50,29 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	
 	fmt.Printf("Found %d recipes for target '%s'\n", len(targetElements), target)
 	
-	// Use single DFS first to get at least one valid recipe quickly
-	singleTree, singleTime, singleNodes := DFS(target, elements)
-	
-	// Track total nodes visited
-	var totalNodesVisited int32 = int32(singleNodes)
-	
 	// Create a map to track unique recipes
 	var resultsLock sync.Mutex
 	var results []models.RecipeTree
 	uniqueRecipes := make(map[string]bool)
 	
+	// Track total nodes visited
+	var totalNodesVisited int32 = 0
+	
+	// Use DFS for the first recipe (reliable and complete to basic elements)
+	fmt.Printf("Getting first recipe using DFS\n")
+	singleTree, singleTime, singleNodes := DFS(target, elements)
+	atomic.AddInt32(&totalNodesVisited, int32(singleNodes))
+	
 	// If DFS found a recipe, use it as our first result
-	if singleTree.Root != "" { // Check if valid tree
+	if singleTree.Root != "" {
 		resultsLock.Lock()
 		treeKey := generateTreeKey(singleTree)
 		uniqueRecipes[treeKey] = true
 		results = append(results, singleTree)
 		resultsLock.Unlock()
-		fmt.Printf("Found first recipe using single DFS in %.2f seconds\n", singleTime)
+		fmt.Printf("Found first recipe using DFS in %.2f seconds\n", singleTime)
 	} else {
-		fmt.Printf("Single DFS couldn't find a recipe for %s\n", target)
+		fmt.Printf("DFS couldn't find a recipe for %s\n", target)
 	}
 	
 	// If we only wanted one recipe or already have the max, return now
@@ -103,7 +105,6 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 					// Signal done if we've reached max recipes
 					if len(results) >= maxRecipes {
 						close(done)
-						break
 					}
 				}
 			}
@@ -114,6 +115,14 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	
 	// Process each top-level recipe in a separate goroutine
 	for i, element := range targetElements {
+		// Skip if we've already found enough recipes
+		select {
+		case <-done:
+			break
+		default:
+			// Continue processing
+		}
+		
 		if len(element.Recipes) != 2 {
 			continue
 		}
@@ -136,7 +145,7 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 			defer wg.Done()
 			
 			// Create a timeout for this goroutine
-			timeout := time.After(2 * time.Second)
+			timeout := time.After(3 * time.Second)
 			
 			// Create done channel for early termination
 			workerDone := make(chan struct{})
@@ -145,11 +154,23 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 			go func() {
 				defer close(workerDone)
 				
-				// First attempt to create a tree with this recipe
-				tree := createBasicRecipeTree(target, component1, component2, elementMap, &totalNodesVisited)
+				// Create a state for tracking visited nodes
+				state := &DFSState{
+					Target:       target,
+					ElementMap:   elementMap,
+					Path:         make([]string, 0),
+					NodesVisited: 0,
+					Cache:        NewRecipeCache(),
+				}
 				
-				// Check if we created a valid tree
+				// Create a complete recipe tree down to basic elements
+				tree := createCompleteRecipeTree(target, component1, component2, state)
+				
+				// Check if we created a valid tree and send it
 				if tree.Root != "" {
+					// Update visited count atomically
+					atomic.AddInt32(&totalNodesVisited, int32(state.NodesVisited))
+					
 					// Try to send to channel, non-blocking in case channel is full
 					select {
 					case recipeChannel <- tree:
@@ -206,158 +227,76 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	return results, time.Since(startTime).Seconds(), int(totalNodesVisited)
 }
 
-// createBasicRecipeTree creates a recipe tree with non-empty children for non-basic elements
-func createBasicRecipeTree(target, comp1, comp2 string, elementMap map[string][]models.Element, nodesVisited *int32) models.RecipeTree {
-	// Process first component
-	var comp1Tree models.RecipeTree
-	var comp1TreeValid bool
+// Create a recipe tree with complete paths to basic elements
+func createCompleteRecipeTree(target, comp1, comp2 string, state *DFSState) models.RecipeTree {
+	// Increment visit count
+	state.NodesVisited++
 	
+	// Check tier constraints
+	targetTier := getElementTier(target, state.ElementMap)
+	comp1Tier := getElementTier(comp1, state.ElementMap)
+	comp2Tier := getElementTier(comp2, state.ElementMap)
+	
+	if comp1Tier >= targetTier || comp2Tier >= targetTier {
+		return models.RecipeTree{}
+	}
+	
+	// Create component trees recursively to ensure paths to basic elements
+	var comp1Tree, comp2Tree models.RecipeNode
+	comp1Found, comp2Found := false, false
+	
+	// Process first component - try to get a complete path
 	if IsBasicElement(comp1) {
-		atomic.AddInt32(nodesVisited, 1)
-		comp1Tree = models.RecipeTree{
-			Root:     comp1,
-			Left:     "",
-			Right:    "",
-			Tier:     "0",
-			Children: []models.RecipeTree{},
+		// Basic element is already a leaf
+		comp1Tree = models.RecipeNode{
+			Element: comp1,
+			IsBasic: true,
 		}
-		comp1TreeValid = true
+		comp1Found = true
 	} else {
-		atomic.AddInt32(nodesVisited, 1)
-		comp1Elem, exists := elementMap[comp1]
-		// Non-basic element must have proper children
-		if exists && len(comp1Elem) > 0 {
-			// Find the first valid recipe for comp1
-			for _, el := range comp1Elem {
-				if len(el.Recipes) == 2 {
-					subComp1 := el.Recipes[0]
-					subComp2 := el.Recipes[1]
-					
-					// Create a proper tree for comp1
-					comp1Tree = models.RecipeTree{
-						Root:  comp1,
-						Left:  subComp1,
-						Right: subComp2,
-						Tier:  fmt.Sprintf("%d", getTier(comp1, elementMap)),
-						Children: []models.RecipeTree{
-							{
-								Root:     subComp1,
-								Left:     "",
-								Right:    "",
-								Tier:     fmt.Sprintf("%d", getTier(subComp1, elementMap)),
-								Children: []models.RecipeTree{},
-							},
-							{
-								Root:     subComp2,
-								Left:     "",
-								Right:    "",
-								Tier:     fmt.Sprintf("%d", getTier(subComp2, elementMap)),
-								Children: []models.RecipeTree{},
-							},
-						},
-					}
-					atomic.AddInt32(nodesVisited, 2)
-					comp1TreeValid = true
-					break
-				}
-			}
-		}
-		
-		// If we still don't have a proper tree for comp1
-		if !comp1TreeValid {
-			// Create a minimal node without children as fallback
-			comp1Tree = models.RecipeTree{
-				Root:     comp1,
-				Left:     "",
-				Right:    "",
-				Tier:     fmt.Sprintf("%d", getTier(comp1, elementMap)),
-				Children: []models.RecipeTree{},
-			}
-			comp1TreeValid = true
+		// Try to find a valid recipe path for comp1
+		comp1Node, found := dfsSearchRecipe(state, comp1)
+		if found {
+			comp1Tree = comp1Node
+			comp1Found = true
 		}
 	}
 	
-	// Process second component
-	var comp2Tree models.RecipeTree
-	var comp2TreeValid bool
-	
+	// Process second component - try to get a complete path
 	if IsBasicElement(comp2) {
-		atomic.AddInt32(nodesVisited, 1)
-		comp2Tree = models.RecipeTree{
-			Root:     comp2,
-			Left:     "",
-			Right:    "",
-			Tier:     "0",
-			Children: []models.RecipeTree{},
+		// Basic element is already a leaf
+		comp2Tree = models.RecipeNode{
+			Element: comp2,
+			IsBasic: true,
 		}
-		comp2TreeValid = true
+		comp2Found = true
 	} else {
-		atomic.AddInt32(nodesVisited, 1)
-		comp2Elem, exists := elementMap[comp2]
-		// Non-basic element must have proper children
-		if exists && len(comp2Elem) > 0 {
-			// Find the first valid recipe for comp2
-			for _, el := range comp2Elem {
-				if len(el.Recipes) == 2 {
-					subComp1 := el.Recipes[0]
-					subComp2 := el.Recipes[1]
-					
-					// Create a proper tree for comp2
-					comp2Tree = models.RecipeTree{
-						Root:  comp2,
-						Left:  subComp1,
-						Right: subComp2,
-						Tier:  fmt.Sprintf("%d", getTier(comp2, elementMap)),
-						Children: []models.RecipeTree{
-							{
-								Root:     subComp1,
-								Left:     "",
-								Right:    "",
-								Tier:     fmt.Sprintf("%d", getTier(subComp1, elementMap)),
-								Children: []models.RecipeTree{},
-							},
-							{
-								Root:     subComp2,
-								Left:     "",
-								Right:    "",
-								Tier:     fmt.Sprintf("%d", getTier(subComp2, elementMap)),
-								Children: []models.RecipeTree{},
-							},
-						},
-					}
-					atomic.AddInt32(nodesVisited, 2)
-					comp2TreeValid = true
-					break
-				}
-			}
-		}
-		
-		// If we still don't have a proper tree for comp2
-		if !comp2TreeValid {
-			// Create a minimal node without children as fallback
-			comp2Tree = models.RecipeTree{
-				Root:     comp2,
-				Left:     "",
-				Right:    "",
-				Tier:     fmt.Sprintf("%d", getTier(comp2, elementMap)),
-				Children: []models.RecipeTree{},
-			}
-			comp2TreeValid = true
+		// Try to find a valid recipe path for comp2
+		comp2Node, found := dfsSearchRecipe(state, comp2)
+		if found {
+			comp2Tree = comp2Node
+			comp2Found = true
 		}
 	}
 	
-	// Create the final tree
-	if !comp1TreeValid || !comp2TreeValid {
-		return models.RecipeTree{} // Empty invalid tree
+	// If either component failed, return empty tree
+	if !comp1Found || !comp2Found {
+		return models.RecipeTree{}
 	}
 	
-	return models.RecipeTree{
-		Root:     target,
-		Left:     comp1,
-		Right:    comp2,
-		Tier:     fmt.Sprintf("%d", getTier(target, elementMap)),
-		Children: []models.RecipeTree{comp1Tree, comp2Tree},
+	// Convert the RecipeNodes to RecipeTrees
+	finalTree := models.RecipeTree{
+		Root:  target,
+		Left:  comp1,
+		Right: comp2,
+		Tier:  fmt.Sprintf("%d", targetTier),
+		Children: []models.RecipeTree{
+			ConvertToRecipeTree(comp1Tree, state.ElementMap),
+			ConvertToRecipeTree(comp2Tree, state.ElementMap),
+		},
 	}
+	
+	return finalTree
 }
 
 // Helper functions
