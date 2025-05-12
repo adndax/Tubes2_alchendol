@@ -6,14 +6,16 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"os"
+	"context"
 	"Tubes2_alchendol/models"
 )
 
 // MultipleDFS searches for multiple recipes using concurrent DFS with multithreading
 func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]models.RecipeTree, float64, int) {
-	// Cap maximum recipes at 20 to prevent excessive combinations
-	if maxRecipes > 20 {
-		maxRecipes = 20
+	// Cap maximum recipes at a reasonable number
+	if maxRecipes > 100 {
+		maxRecipes = 100
 	}
 	
 	startTime := time.Now()
@@ -41,88 +43,85 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		return []models.RecipeTree{basicTree}, time.Since(startTime).Seconds(), 1
 	}
 	
-	// Get all top-level recipes for the target
+	// Track results and nodes visited
+	var results []models.RecipeTree
+	var uniqueRecipes = make(map[string]bool)
+	var totalNodesVisited int32 = 0
+	var resultsMutex sync.Mutex
+	
+	// Create atomic counter for unique recipes found
+	var uniqueRecipesCounter int32 = 0
+	
+	// Get all direct recipes for the target
 	targetElements, found := elementMap[target]
 	if !found || len(targetElements) == 0 {
 		fmt.Printf("No recipes found for target '%s' in elementMap\n", target)
 		return []models.RecipeTree{}, time.Since(startTime).Seconds(), 0
 	}
 	
-	fmt.Printf("Found %d recipes for target '%s'\n", len(targetElements), target)
+	// Create a channel for recipe trees from workers
+	treeChannel := make(chan models.RecipeTree, 100)
 	
-	// Create a map to track unique recipes
-	var resultsLock sync.Mutex
-	var results []models.RecipeTree
-	uniqueRecipes := make(map[string]bool)
+	// Create a context for coordinated cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	
-	// Track total nodes visited
-	var totalNodesVisited int32 = 0
+	// Signal channel for early termination
+	done := make(chan struct{})
 	
-	// Use DFS for the first recipe (reliable and complete to basic elements)
-	fmt.Printf("Getting first recipe using DFS\n")
-	singleTree, singleTime, singleNodes := DFS(target, elements)
-	atomic.AddInt32(&totalNodesVisited, int32(singleNodes))
+	// Worker counter
+	var waitGroup sync.WaitGroup
 	
-	// If DFS found a recipe, use it as our first result
-	if singleTree.Root != "" {
-		resultsLock.Lock()
-		treeKey := generateTreeKey(singleTree)
-		uniqueRecipes[treeKey] = true
-		results = append(results, singleTree)
-		resultsLock.Unlock()
-		fmt.Printf("Found first recipe using DFS in %.2f seconds\n", singleTime)
-	} else {
-		fmt.Printf("DFS couldn't find a recipe for %s\n", target)
-	}
-	
-	// If we only wanted one recipe or already have the max, return now
-	if maxRecipes <= 1 || len(results) >= maxRecipes {
-		return results, time.Since(startTime).Seconds(), int(totalNodesVisited)
-	}
-	
-	// Setup for multithreaded recipe generation
-	var wg sync.WaitGroup
-	done := make(chan struct{}) // Channel to signal early completion
-	
-	// Create a channel to collect results from worker goroutines
-	recipeChannel := make(chan models.RecipeTree, 100)
-	
-	// Start a goroutine to collect recipes from the channel
+	// Start a collector goroutine to process the trees
 	go func() {
-		for recipeTree := range recipeChannel {
-			resultsLock.Lock()
+		for tree := range treeChannel {
+			if tree.Root == "" {
+				continue
+			}
 			
-			// Only add if we haven't reached max yet
-			if len(results) < maxRecipes {
-				treeKey := generateTreeKey(recipeTree)
+			resultsMutex.Lock()
+			
+			// Check if we've reached max recipes
+			if len(results) >= maxRecipes {
+				resultsMutex.Unlock()
+				continue
+			}
+			
+			// Generate a unique key for this tree
+			treeKey := generateCompleteTreeKey(tree)
+			
+			// Only add if we haven't seen this tree before
+			if !uniqueRecipes[treeKey] {
+				uniqueRecipes[treeKey] = true
+				results = append(results, tree)
 				
-				// Add if not a duplicate
-				if !uniqueRecipes[treeKey] {
-					uniqueRecipes[treeKey] = true
-					results = append(results, recipeTree)
-					fmt.Printf("Added recipe %d of %d to results\n", len(results), maxRecipes)
-					
-					// Signal done if we've reached max recipes
-					if len(results) >= maxRecipes {
-						close(done)
+				// Increment our atomic counter for unique recipes
+				newCount := atomic.AddInt32(&uniqueRecipesCounter, 1)
+				
+				fmt.Printf("Added recipe %d/%d: %s + %s (Unique tree: %d)\n", 
+					len(results), maxRecipes, tree.Left, tree.Right, newCount)
+				
+				// If we've reached max recipes, signal done
+				if len(results) >= maxRecipes {
+					select {
+					case done <- struct{}{}:
+					default:
 					}
 				}
 			}
 			
-			resultsLock.Unlock()
+			resultsMutex.Unlock()
 		}
 	}()
 	
-	// Process each top-level recipe in a separate goroutine
-	for i, element := range targetElements {
-		// Skip if we've already found enough recipes
-		select {
-		case <-done:
-			break
-		default:
-			// Continue processing
-		}
-		
+	// First, process all direct recipe combinations
+	processedCombos := make(map[string]bool)
+	var directCombinations []struct {
+		Comp1, Comp2 string
+	}
+	
+	// Collect unique direct combinations
+	for _, element := range targetElements {
 		if len(element.Recipes) != 2 {
 			continue
 		}
@@ -130,96 +129,90 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		comp1 := element.Recipes[0]
 		comp2 := element.Recipes[1]
 		
-		// Skip if components don't exist in element map
-		if _, exists := elementMap[comp1]; !exists {
+		// Create a unique key for this combination
+		var comboKey string
+		if comp1 < comp2 {
+			comboKey = comp1 + "+" + comp2
+		} else {
+			comboKey = comp2 + "+" + comp1
+		}
+		
+		if processedCombos[comboKey] {
 			continue
 		}
 		
-		if _, exists := elementMap[comp2]; !exists {
-			continue
-		}
+		processedCombos[comboKey] = true
+		directCombinations = append(directCombinations, struct {
+			Comp1, Comp2 string
+		}{
+			Comp1: comp1,
+			Comp2: comp2,
+		})
+	}
+	
+	fmt.Printf("Found %d unique direct combinations for %s\n", len(directCombinations), target)
+	
+	// Process each direct combination
+	for i, combo := range directCombinations {
+		waitGroup.Add(1)
 		
-		// Launch a goroutine for each recipe
-		wg.Add(1)
-		go func(recipeIndex int, component1, component2 string) {
-			defer wg.Done()
+		go func(index int, c1, c2 string) {
+			defer waitGroup.Done()
 			
-			// Create a timeout for this goroutine
-			timeout := time.After(3 * time.Second)
-			
-			// Create done channel for early termination
-			workerDone := make(chan struct{})
-			
-			// Process this recipe in yet another goroutine to handle timeout
-			go func() {
-				defer close(workerDone)
-				
-				// Create a state for tracking visited nodes
-				state := &DFSState{
-					Target:       target,
-					ElementMap:   elementMap,
-					Path:         make([]string, 0),
-					NodesVisited: 0,
-					Cache:        NewRecipeCache(),
-				}
-				
-				// Create a complete recipe tree down to basic elements
-				tree := createCompleteRecipeTree(target, component1, component2, state)
-				
-				// Check if we created a valid tree and send it
-				if tree.Root != "" {
-					// Update visited count atomically
-					atomic.AddInt32(&totalNodesVisited, int32(state.NodesVisited))
-					
-					// Try to send to channel, non-blocking in case channel is full
-					select {
-					case recipeChannel <- tree:
-						fmt.Printf("Worker %d: Added recipe for %s + %s\n", recipeIndex, component1, component2)
-					case <-done:
-						// Skip if we're already done
-						return
-					default:
-						// Skip if channel is full
-					}
-				}
-			}()
-			
-			// Wait for either completion, timeout, or done signal
-			select {
-			case <-workerDone:
-				// Worker finished normally
-			case <-timeout:
-				fmt.Printf("Worker %d timed out\n", recipeIndex)
-			case <-done:
-				// We've reached max recipes, stop processing
-				return
+			// Create a new state for this combination
+			state := &DFSState{
+				Target:       target,
+				ElementMap:   elementMap,
+				Path:         make([]string, 0),
+				NodesVisited: 0,
+				Cache:        NewRecipeCache(),
 			}
 			
-		}(i, comp1, comp2)
+			// First, try the direct combination
+			tree := createCompleteRecipeTree(target, c1, c2, state)
+			
+			// Update nodes visited
+			atomic.AddInt32(&totalNodesVisited, int32(state.NodesVisited))
+			
+			// Send the tree to the channel if valid
+			if tree.Root != "" {
+				select {
+				case treeChannel <- tree:
+				case <-ctx.Done():
+					return
+				case <-done:
+					return
+				}
+			}
+			
+			// Now explore alternative trees for this combination's components
+			exploreAlternativeTrees(target, c1, c2, elementMap, treeChannel, ctx, done)
+			
+		}(i, combo.Comp1, combo.Comp2)
 	}
 	
-	// Wait for all goroutines or early termination
-	waitCh := make(chan struct{})
+	// Wait for all workers to finish or timeout
 	go func() {
-		wg.Wait()
-		close(waitCh)
+		waitGroup.Wait()
+		close(treeChannel)
 	}()
 	
-	// Wait for workers to finish with timeout
+	// Wait for completion or timeout
 	select {
-	case <-waitCh:
-		fmt.Println("All workers completed normally")
-	case <-time.After(5 * time.Second):
-		fmt.Println("Some workers timed out, proceeding with results collected so far")
+	case <-ctx.Done():
+		fmt.Println("Processing timed out, using results gathered so far")
 	case <-done:
-		fmt.Printf("Found all %d requested recipes, stopping other workers\n", maxRecipes)
+		fmt.Printf("Found all %d requested recipes\n", maxRecipes)
 	}
 	
-	// Close the recipe channel to signal collector to finish
-	close(recipeChannel)
+	// Debug output if enabled
+	if os.Getenv("DEBUG_RECIPES") == "1" && len(results) > 1 {
+		DebugDisplayRecipeDifferences(results)
+	}
 	
-	// Give collector goroutine time to process remaining items
-	time.Sleep(10 * time.Millisecond)
+	// Get the final count of unique recipes found
+	finalUniqueCount := atomic.LoadInt32(&uniqueRecipesCounter)
+	fmt.Printf("Total unique recipe combinations found: %d\n", finalUniqueCount)
 	
 	fmt.Printf("MultipleDFS returning %d recipes for %s with %d nodes visited\n", 
 		len(results), target, totalNodesVisited)
@@ -227,7 +220,357 @@ func MultipleDFS(target string, elements []models.Element, maxRecipes int) ([]mo
 	return results, time.Since(startTime).Seconds(), int(totalNodesVisited)
 }
 
-// Create a recipe tree with complete paths to basic elements
+// Function to explore alternative recipes for a given component pair
+func exploreAlternativeTrees(target, comp1, comp2 string, elementMap map[string][]models.Element, 
+	treeChannel chan<- models.RecipeTree, ctx context.Context, done <-chan struct{}) {
+	
+	// Check for context cancellation or done signal
+	select {
+	case <-ctx.Done():
+		return
+	case <-done:
+		return
+	default:
+		// Continue
+	}
+	
+	// Get target tier
+	targetTier := -1
+	if elements, found := elementMap[target]; found && len(elements) > 0 {
+		targetTier = elements[0].Tier
+	}
+	
+	// Skip basic elements
+	if IsBasicElement(comp1) && IsBasicElement(comp2) {
+		return
+	}
+	
+	// Find all alternative recipes for the first component
+	if !IsBasicElement(comp1) && comp1 != target { // Avoid cycles
+		exploreComponentCombinations(comp1, elementMap, func(altComp1Tree models.RecipeTree) {
+			// For each alternative for comp1, create a standard tree for comp2
+			state := &DFSState{
+				Target:       comp2,
+				ElementMap:   elementMap,
+				Path:         make([]string, 0),
+				NodesVisited: 0,
+				Cache:        NewRecipeCache(),
+			}
+			
+			// Find a standard path for comp2
+			comp2Node, found := dfsSearchRecipe(state, comp2)
+			if !found {
+				return
+			}
+			
+			// Convert to RecipeTree
+			comp2Tree := ConvertToRecipeTree(comp2Node, elementMap)
+			
+			// Create the full tree with this alternative
+			fullTree := models.RecipeTree{
+				Root:  target,
+				Left:  comp1,
+				Right: comp2,
+				Tier:  fmt.Sprintf("%d", targetTier),
+				Children: []models.RecipeTree{
+					altComp1Tree,
+					comp2Tree,
+				},
+			}
+			
+			// Send to the channel
+			select {
+			case treeChannel <- fullTree:
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			default:
+				// Channel full, skip
+			}
+		})
+	}
+	
+	// Find all alternative recipes for the second component
+	if !IsBasicElement(comp2) && comp2 != target { // Avoid cycles
+		exploreComponentCombinations(comp2, elementMap, func(altComp2Tree models.RecipeTree) {
+			// For each alternative for comp2, create a standard tree for comp1
+			state := &DFSState{
+				Target:       comp1,
+				ElementMap:   elementMap,
+				Path:         make([]string, 0),
+				NodesVisited: 0,
+				Cache:        NewRecipeCache(),
+			}
+			
+			// Find a standard path for comp1
+			comp1Node, found := dfsSearchRecipe(state, comp1)
+			if !found {
+				return
+			}
+			
+			// Convert to RecipeTree
+			comp1Tree := ConvertToRecipeTree(comp1Node, elementMap)
+			
+			// Create the full tree with this alternative
+			fullTree := models.RecipeTree{
+				Root:  target,
+				Left:  comp1,
+				Right: comp2,
+				Tier:  fmt.Sprintf("%d", targetTier),
+				Children: []models.RecipeTree{
+					comp1Tree,
+					altComp2Tree,
+				},
+			}
+			
+			// Send to the channel
+			select {
+			case treeChannel <- fullTree:
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			default:
+				// Channel full, skip
+			}
+		})
+	}
+	
+	// Now try exploring even deeper combinations - variations of both components
+	if !IsBasicElement(comp1) && !IsBasicElement(comp2) && comp1 != target && comp2 != target {
+		// Find different combinations for both components
+		exploreComponentCombinations(comp1, elementMap, func(altComp1Tree models.RecipeTree) {
+			exploreComponentCombinations(comp2, elementMap, func(altComp2Tree models.RecipeTree) {
+				// Create a full tree with both alternative components
+				fullTree := models.RecipeTree{
+					Root:  target,
+					Left:  comp1,
+					Right: comp2,
+					Tier:  fmt.Sprintf("%d", targetTier),
+					Children: []models.RecipeTree{
+						altComp1Tree,
+						altComp2Tree,
+					},
+				}
+				
+				// Send to the channel
+				select {
+				case treeChannel <- fullTree:
+				case <-ctx.Done():
+					return
+				case <-done:
+					return
+				default:
+					// Channel full, skip
+				}
+			})
+		})
+	}
+}
+
+// Function to explore different combinations for a component
+func exploreComponentCombinations(component string, elementMap map[string][]models.Element, 
+	callback func(models.RecipeTree)) {
+	
+	// Get component tier
+	compTier := -1
+	if elements, found := elementMap[component]; found && len(elements) > 0 {
+		compTier = elements[0].Tier
+	}
+	
+	// Get all recipes for this component
+	componentElements, found := elementMap[component]
+	if !found || len(componentElements) == 0 {
+		return
+	}
+	
+	// Try each recipe
+	processedCombos := make(map[string]bool)
+	
+	for _, element := range componentElements {
+		if len(element.Recipes) != 2 {
+			continue
+		}
+		
+		subComp1 := element.Recipes[0]
+		subComp2 := element.Recipes[1]
+		
+		// Skip if components don't exist
+		if _, exists := elementMap[subComp1]; !exists {
+			continue
+		}
+		if _, exists := elementMap[subComp2]; !exists {
+			continue
+		}
+		
+		// Create a unique key for this combination
+		var comboKey string
+		if subComp1 < subComp2 {
+			comboKey = subComp1 + "+" + subComp2
+		} else {
+			comboKey = subComp2 + "+" + subComp1
+		}
+		
+		// Skip if we've processed this combination
+		if processedCombos[comboKey] {
+			continue
+		}
+		
+		processedCombos[comboKey] = true
+		
+		// Check tier constraints
+		subComp1Tier := -1
+		if elements, found := elementMap[subComp1]; found && len(elements) > 0 {
+			subComp1Tier = elements[0].Tier
+		} else if IsBasicElement(subComp1) {
+			subComp1Tier = 0
+		}
+		
+		subComp2Tier := -1
+		if elements, found := elementMap[subComp2]; found && len(elements) > 0 {
+			subComp2Tier = elements[0].Tier
+		} else if IsBasicElement(subComp2) {
+			subComp2Tier = 0
+		}
+		
+		// Skip tier violations
+		if subComp1Tier >= compTier || subComp2Tier >= compTier {
+			continue
+		}
+		
+		// Create a new state for this component
+		state := &DFSState{
+			Target:       component,
+			ElementMap:   elementMap,
+			Path:         make([]string, 0),
+			NodesVisited: 0,
+			Cache:        NewRecipeCache(),
+		}
+		
+		// Create tree for this combination
+		tree := createCompleteRecipeTree(component, subComp1, subComp2, state)
+		
+		// Call the callback with this tree if valid
+		if tree.Root != "" {
+			callback(tree)
+			
+			// Try recursively exploring even deeper if components are not basic
+			if !IsBasicElement(subComp1) && subComp1 != component {
+				// Explore variations of subComp1
+				exploreComponentVariations(subComp1, subComp2, component, elementMap, callback)
+			}
+			
+			if !IsBasicElement(subComp2) && subComp2 != component {
+				// Explore variations of subComp2
+				exploreComponentVariations(subComp2, subComp1, component, elementMap, callback)
+			}
+		}
+	}
+}
+
+// Helper function to explore variations of a specific component in a recipe
+func exploreComponentVariations(targetComp, otherComp, parentElement string, 
+	elementMap map[string][]models.Element, callback func(models.RecipeTree)) {
+	
+	// Create a state for the parent element
+	parentState := &DFSState{
+		Target:       parentElement,
+		ElementMap:   elementMap,
+		Path:         make([]string, 0),
+		NodesVisited: 0,
+		Cache:        NewRecipeCache(),
+	}
+	
+	// Get a standard tree for the other component
+	otherNode, found := dfsSearchRecipe(parentState, otherComp)
+	if !found {
+		return
+	}
+	
+	// Convert to RecipeTree
+	otherTree := ConvertToRecipeTree(otherNode, elementMap)
+	
+	// Get tier for the parent element
+	parentTier := -1
+	if elements, found := elementMap[parentElement]; found && len(elements) > 0 {
+		parentTier = elements[0].Tier
+	}
+	
+	// Explore variations of the target component
+	exploreComponentCombinations(targetComp, elementMap, func(altCompTree models.RecipeTree) {
+		// Create a tree with this variation
+		var altTree models.RecipeTree
+		
+		// Order components correctly
+		if targetComp < otherComp {
+			altTree = models.RecipeTree{
+				Root:  parentElement,
+				Left:  targetComp,
+				Right: otherComp,
+				Tier:  fmt.Sprintf("%d", parentTier),
+				Children: []models.RecipeTree{
+					altCompTree,
+					otherTree,
+				},
+			}
+		} else {
+			altTree = models.RecipeTree{
+				Root:  parentElement,
+				Left:  otherComp,
+				Right: targetComp,
+				Tier:  fmt.Sprintf("%d", parentTier),
+				Children: []models.RecipeTree{
+					otherTree,
+					altCompTree,
+				},
+			}
+		}
+		
+		// Call the callback with this variation
+		callback(altTree)
+	})
+}
+
+// Helper function to generate a more detailed key for a tree
+func generateCompleteTreeKey(tree models.RecipeTree) string {
+	var sb strings.Builder
+	generateCompleteTreeKeyHelper(tree, &sb, 0)
+	return sb.String()
+}
+
+func generateCompleteTreeKeyHelper(tree models.RecipeTree, sb *strings.Builder, depth int) {
+	// Limit recursion depth
+	if depth > 10 {
+		sb.WriteString(tree.Root)
+		return
+	}
+	
+	sb.WriteString(tree.Root)
+	
+	if len(tree.Children) == 0 {
+		return
+	}
+	
+	sb.WriteString("(")
+	
+	if len(tree.Children) >= 2 {
+		// Process children in deterministic order
+		left := tree.Children[0]
+		right := tree.Children[1]
+		
+		generateCompleteTreeKeyHelper(left, sb, depth+1)
+		sb.WriteString("+")
+		generateCompleteTreeKeyHelper(right, sb, depth+1)
+	} else if len(tree.Children) == 1 {
+		generateCompleteTreeKeyHelper(tree.Children[0], sb, depth+1)
+	}
+	
+	sb.WriteString(")")
+}
+
+
+// Create a complete recipe tree with paths to basic elements
 func createCompleteRecipeTree(target, comp1, comp2 string, state *DFSState) models.RecipeTree {
 	// Increment visit count
 	state.NodesVisited++
@@ -299,55 +642,142 @@ func createCompleteRecipeTree(target, comp1, comp2 string, state *DFSState) mode
 	return finalTree
 }
 
-// Helper functions
-func generateTreeKey(tree models.RecipeTree) string {
-	var keyBuilder strings.Builder
-	generateTreeKeyHelper(tree, &keyBuilder)
-	return keyBuilder.String()
-}
 
-func generateTreeKeyHelper(tree models.RecipeTree, sb *strings.Builder) {
-	if len(tree.Children) == 0 {
-		sb.WriteString(tree.Root)
+// ------------------------------------------------------------
+// ---// Debugging and analysis functions
+// Debug function to compare and display recipe differences
+func DebugDisplayRecipeDifferences(recipes []models.RecipeTree) {
+	if len(recipes) <= 1 {
+		fmt.Println("Need at least 2 recipes to compare differences")
 		return
 	}
-	
-	sb.WriteString(tree.Root)
-	sb.WriteString("(")
-	
-	if len(tree.Children) >= 2 {
-		leftKey := tree.Children[0].Root
-		rightKey := tree.Children[1].Root
-		
-		if leftKey < rightKey {
-			generateTreeKeyHelper(tree.Children[0], sb)
-			sb.WriteString("+")
-			generateTreeKeyHelper(tree.Children[1], sb)
-		} else {
-			generateTreeKeyHelper(tree.Children[1], sb)
-			sb.WriteString("+")
-			generateTreeKeyHelper(tree.Children[0], sb)
+
+	// fmt.Println("\n=== COMPLETE RECIPE DIFFERENCES ANALYSIS ===")
+	// fmt.Printf("Analyzing %d different recipes for %s\n", len(recipes), recipes[0].Root)
+
+	// Compare each recipe pair
+	for i := 0; i < len(recipes); i++ {
+		for j := i + 1; j < len(recipes); j++ {
+			// fmt.Printf("\n=============================================")
+			// fmt.Printf("\nCOMPARING RECIPE %d AND RECIPE %d:\n", i+1, j+1)
+			// fmt.Printf("=============================================\n")
+			
+			// First print a summary of each recipe
+			// fmt.Printf("\nRecipe %d structure:\n", i+1)
+			// printRecipeStructure(recipes[i], 0)
+			
+			// fmt.Printf("\nRecipe %d structure:\n", j+1)
+			// printRecipeStructure(recipes[j], 0)
+			
+			// // Then show the detailed differences
+			// fmt.Printf("\nDetailed differences:\n")
+			diffCount := compareRecipeTreesDeep(recipes[i], recipes[j], 0)
+			
+			if diffCount == 0 {
+				fmt.Printf("No differences found! These recipes are identical in structure.\n")
+			} else {
+				fmt.Printf("\nTotal of %d differences found.\n", diffCount)
+			}
 		}
-	} else if len(tree.Children) == 1 {
-		generateTreeKeyHelper(tree.Children[0], sb)
 	}
-	
-	sb.WriteString(")")
 }
 
-func getTier(element string, elementMap map[string][]models.Element) int {
-	if IsBasicElement(element) {
+// Improved comparison function that checks the entire tree structure
+func compareRecipeTreesDeep(tree1, tree2 models.RecipeTree, depth int) int {
+	diffCount := 0
+	// indent := strings.Repeat("  ", depth)
+	
+	// Compare root elements
+	if tree1.Root != tree2.Root {
+		// fmt.Printf("%s- Different elements: [%s] vs [%s]\n", indent, tree1.Root, tree2.Root)
+		return 1 // Early return, trees are completely different
+	}
+	
+	// Check if one has children and the other doesn't
+	if (len(tree1.Children) == 0) != (len(tree2.Children) == 0) {
+		// fmt.Printf("%s- [%s]: One recipe has children, the other doesn't\n", indent, tree1.Root)
+		return 1
+	}
+	
+	// If both are basic elements, no differences
+	if len(tree1.Children) == 0 {
 		return 0
 	}
 	
-	elements, found := elementMap[element]
-	if !found || len(elements) == 0 {
-		return -1
+	// Check direct components
+	if tree1.Left != tree2.Left || tree1.Right != tree2.Right {
+		// fmt.Printf("%s- [%s]: Different components: [%s + %s] vs [%s + %s]\n", 
+		// 	indent, tree1.Root, tree1.Left, tree1.Right, tree2.Left, tree2.Right)
+		diffCount++
 	}
 	
-	return elements[0].Tier
+	// Recursively compare children
+	if len(tree1.Children) >= 2 && len(tree2.Children) >= 2 {
+		// Try to match children in the most logical way
+		var leftTree1, rightTree1, leftTree2, rightTree2 models.RecipeTree
+		
+		// Determine which children to compare with each other
+		if tree1.Left == tree2.Left && tree1.Right == tree2.Right {
+			// Direct match of components
+			leftTree1 = tree1.Children[0]
+			rightTree1 = tree1.Children[1]
+			leftTree2 = tree2.Children[0]
+			rightTree2 = tree2.Children[1]
+		} else if tree1.Left == tree2.Right && tree1.Right == tree2.Left {
+			// Components are swapped
+			leftTree1 = tree1.Children[0]
+			rightTree1 = tree1.Children[1]
+			leftTree2 = tree2.Children[1]
+			rightTree2 = tree2.Children[0]
+		} else {
+			// Components don't match directly, try to match by name
+			if tree1.Children[0].Root == tree2.Children[0].Root {
+				leftTree1 = tree1.Children[0]
+				leftTree2 = tree2.Children[0]
+			} else if tree1.Children[0].Root == tree2.Children[1].Root {
+				leftTree1 = tree1.Children[0]
+				leftTree2 = tree2.Children[1]
+			} else {
+				leftTree1 = tree1.Children[0]
+				leftTree2 = tree2.Children[0] // Best guess
+			}
+			
+			if tree1.Children[1].Root == tree2.Children[1].Root {
+				rightTree1 = tree1.Children[1]
+				rightTree2 = tree2.Children[1]
+			} else if tree1.Children[1].Root == tree2.Children[0].Root {
+				rightTree1 = tree1.Children[1]
+				rightTree2 = tree2.Children[0]
+			} else {
+				rightTree1 = tree1.Children[1]
+				rightTree2 = tree2.Children[1] // Best guess
+			}
+		}
+		
+		// Compare matched children
+		diffCount += compareRecipeTreesDeep(leftTree1, leftTree2, depth+1)
+		diffCount += compareRecipeTreesDeep(rightTree1, rightTree2, depth+1)
+	}
+	
+	return diffCount
 }
 
-func getTierAsString(element string, elementMap map[string][]models.Element) string {
-	return fmt.Sprintf("%d", getTier(element, elementMap))
+// Improved structure printing that shows the complete tree
+func printRecipeStructure(tree models.RecipeTree, depth int) {
+	// indent := strings.Repeat("  ", depth)
+	
+	// if len(tree.Children) == 0 {
+	// 	// Basic element
+	// 	fmt.Printf("%s• %s (basic element)\n", indent, tree.Root)
+	// 	return
+	// }
+	
+	// // Print this element and its components
+	// fmt.Printf("%s• %s = %s + %s\n", indent, tree.Root, tree.Left, tree.Right)
+	
+	// // Recursively print children
+	// if len(tree.Children) >= 2 {
+	// 	printRecipeStructure(tree.Children[0], depth+1)
+	// 	printRecipeStructure(tree.Children[1], depth+1)
+	// }
 }
