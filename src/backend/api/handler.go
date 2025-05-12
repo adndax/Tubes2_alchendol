@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
 	"Tubes2_alchendol/search"
@@ -49,66 +50,94 @@ func SearchHandler(c *gin.Context) {
 	// Cek jumlah maksimum resep
 	maxRecipes := 3
 	if multiple {
-		if val, err := strconv.Atoi(maxRecipesStr); err == nil && val > 0 && val <= 10 {
+		if val, err := strconv.Atoi(maxRecipesStr); err == nil {
 			maxRecipes = val
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "maxRecipes harus berupa angka antara 1 sampai 10"})
-			return
 		}
 	}
 
 	switch algo {
 	case "dfs":
-		// Mode single hanya, DFS tidak mendukung multiple tree
-		result := search.DFS(target, elements)
-	
-		c.Header("Content-Type", "application/json")
-		prettyJSON, err := json.MarshalIndent(result, "", "    ")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-			return
-		}
-		c.Writer.Write(prettyJSON)
+        if multiple {
+            // Multiple DFS
+            recipes, timeElapsed, nodesVisited := search.MultipleDFS(target, elements, maxRecipes)
+            
+            // Debug: Check what we got back
+            fmt.Printf("DEBUG: MultipleDFS returned %d recipes for %s (maxRecipes=%d)\n", 
+                len(recipes), target, maxRecipes)
+                
+            // Use consistent format for both algorithms
+            response := gin.H{
+                "nodesVisited": nodesVisited,
+                "roots": recipes,
+                "timeElapsed": timeElapsed,
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
+        } else {
+            // Single DFS (remains the same)
+            recipeTree, timeElapsed, nodesVisited := search.DFS(target, elements)
+            
+            response := gin.H{
+                "nodesVisited": nodesVisited,
+                "root": recipeTree,
+                "timeElapsed": timeElapsed,
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
+        }
+    
 		
-		case "bidirectional":
-				if multiple {
-					// Bidirectional Multiple - gunakan fungsi yang baru dibuat
-					trees, timeTaken, nodes := search.MultipleBidirectional(target, elements, maxRecipes)
-					
-					// Format output untuk multiple recipes
-					response := gin.H{
-						"nodesVisited": nodes,
-						"root": trees, // Array of trees
-						"timeElapsed": timeTaken,
-					}
-					
-					c.Header("Content-Type", "application/json")
-					prettyJSON, err := json.MarshalIndent(response, "", "    ")
-					if err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-						return
-					}
-					c.Writer.Write(prettyJSON)
-				} else {
-					// Bidirectional Single
-					tree, timeTaken, nodes := search.BidirectionalSearch(target, elements)
-					
-					response := gin.H{
-						"nodesVisited": nodes,
-						"root": tree,
-						"timeElapsed": timeTaken,
-					}
-					
-					c.Header("Content-Type", "application/json")
-					prettyJSON, err := json.MarshalIndent(response, "", "    ")
-					if err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-						return
-					}
-					c.Writer.Write(prettyJSON)
-				}
+    case "bidirectional":
+        if multiple {
+            // Bidirectional Multiple - gunakan fungsi yang baru dibuat
+            trees, timeTaken, nodes := search.MultipleBidirectional(target, elements, maxRecipes)
+            
+            // Format output untuk multiple recipes - use the same format as DFS for consistency
+            response := gin.H{
+                "nodesVisited": nodes,
+                "roots": trees, // Use 'roots' key instead of 'root' for consistency with DFS
+                "timeElapsed": timeTaken,
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
+        } else {
+            // Bidirectional Single
+            tree, timeTaken, nodes := search.BidirectionalSearch(target, elements)
+            
+            response := gin.H{
+                "nodesVisited": nodes,
+                "root": tree,
+                "timeElapsed": timeTaken,
+            }
+            
+            c.Header("Content-Type", "application/json")
+            prettyJSON, err := json.MarshalIndent(response, "", "    ")
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
+                return
+            }
+            c.Writer.Write(prettyJSON)
+        }
 
-			default:
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali. Gunakan 'dfs' atau 'bidirectional'"})
-			}
-		}
+    default:
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali. Gunakan 'dfs' atau 'bidirectional'"})
+    }
+}
