@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { elements } from "@data";
 
-export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", maxRecipes = 1, onStatsUpdate }) {
+export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", maxRecipes = 5, onStatsUpdate }) {
   const ref = useRef();
   const [treeData, setTreeData] = useState(null);
   const [error, setError] = useState(null);
@@ -16,6 +16,16 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   elements.forEach(element => {
     elementImageMap[element.name] = element.imageSrc;
   });
+
+  // List of basic elements and special elements
+  const basicElements = ["Air", "Earth", "Fire", "Water"];
+  const specialElements = ["Clock", "Death", "Dinosaur", "Family Tree", "Peat", "Skeleton", "Sloth", "Tree"];
+
+  // Determine if element is complex and needs longer timeout
+  const isComplexElement = (elementName) => {
+    const complexElements = ["Picnic", "Skyscraper", "City", "Continent", "Horseshoe", "Unicorn"];
+    return complexElements.includes(elementName);
+  };
 
   // Effect to handle fetching data
   useEffect(() => {
@@ -37,7 +47,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     // Build the correct URL with all parameters
     let url = `http://localhost:8080/api/search?algo=${formattedAlgo}&target=${encodeURIComponent(target)}`;
     
-    // Important: Make sure we're passing maxRecipes correctly
+    // Important: Make sure we're passing maxRecipes correctly for multiple mode
     if (mode === "multiple") {
       // Use both mode and multiple parameters to ensure compatibility
       url += `&mode=multiple&multiple=true&maxRecipes=${maxRecipes}`;
@@ -45,15 +55,18 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     
     console.log("Fetching from URL:", url);
     
+    // Set longer timeout for complex elements
+    const timeoutDuration = isComplexElement(target) ? 30000 : 15000; // 30 seconds for complex elements
+    
     // Set client-side timeout
     const fetchTimeoutId = setTimeout(() => {
       setLoading(false);
-      setError(`Request timed out after 15 seconds. The server might be busy or the element "${target}" might be too complex to process.`);
+      setError(`Request timed out after ${timeoutDuration/1000} seconds. The server might be busy or the element "${target}" might be too complex to process.`);
       
       if (onStatsUpdate) {
         onStatsUpdate({ nodeCount: 0, timeMs: 0 });
       }
-    }, 15000);
+    }, timeoutDuration);
     
     setTimeoutId(fetchTimeoutId);
     
@@ -181,27 +194,57 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   const countNodesInTree = (node) => {
     if (!node) return 0;
     let count = 1;
-    if (node.children && node.children.length > 0) {
-      node.children.forEach((child) => {
-        count += countNodesInTree(child);
-      });
+    const children = node.children || node.Children || [];
+    
+    for (const child of children) {
+      count += countNodesInTree(child);
     }
+    
     return count;
   };
 
   const getTreeDepth = (node, depth = 0) => {
-    if (!node.children || node.children.length === 0) return depth;
-    return Math.max(...node.children.map((child) => getTreeDepth(child, depth + 1)));
+    if (!node) return depth;
+    
+    const children = node.children || node.Children || [];
+    
+    if (children.length === 0) return depth;
+    
+    return Math.max(...children.map((child) => getTreeDepth(child, depth + 1)));
   };
 
   const getTreeWidth = (node) => {
+    if (!node) return 0;
+    
     const widthByLevel = {};
+    
     const countByLevel = (node, level = 0) => {
       widthByLevel[level] = (widthByLevel[level] || 0) + 1;
-      node.children?.forEach((child) => countByLevel(child, level + 1));
+      
+      const children = node.children || node.Children || [];
+      children.forEach((child) => countByLevel(child, level + 1));
     };
+    
     countByLevel(node);
-    return Math.max(...Object.values(widthByLevel));
+    
+    return Math.max(...Object.values(widthByLevel), 0);
+  };
+
+  // Normalize the tree data to handle different property naming conventions
+  const normalizeTree = (node) => {
+    if (!node) return null;
+    
+    // Create a new normalized node
+    const normalized = {
+      name: node.root || node.Root || node.element || node.name || "",
+      children: []
+    };
+    
+    // Normalize children
+    const sourceChildren = node.children || node.Children || [];
+    normalized.children = sourceChildren.map(child => normalizeTree(child));
+    
+    return normalized;
   };
 
   const renderTree = (data) => {
@@ -211,76 +254,84 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     d3.select(ref.current).selectAll("*").remove();
 
     console.log("Rendering tree data:", JSON.stringify(data, null, 2));
-
-    const treeDepth = getTreeDepth(data);
-    const treeWidth = getTreeWidth(data);
-    const circleRadius = 45; // Bigger circle radius like in paste.txt
     
-    // Adjust spacing based on mode
-    const horizontalSpacing = mode === "multiple" ? 350 : 250;
-    const verticalSpacing = 200;
-    
-    // Calculate dimensions
-    const width = Math.max(1600, treeWidth * horizontalSpacing);
-    const height = Math.max(800, (treeDepth + 1) * verticalSpacing);
-    const margin = { top: 100, right: 150, bottom: 100, left: 150 };
-
-    // Create hierarchy
-    const root = d3.hierarchy(data, (d) => d.children);
-    
-    // Create tree layout
-    const treeLayout = d3.tree()
-      .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
-      .separation((a, b) => {
-        // Increase separation for multiple recipes
-        if (mode === "multiple" && a.parent === root && b.parent === root) {
-          return 3;
-        }
-        return a.parent === b.parent ? 1 : 2;
-      });
-    
-    // Apply the tree layout
-    treeLayout(root);
-
-    // Invert y coordinates (top to bottom)
-    root.descendants().forEach((d) => {
-      d.y = (height - margin.top - margin.bottom) - d.y;
-    });
-
-    // Create SVG
-    const svg = d3.select(ref.current)
-      .attr("width", width)
-      .attr("height", height)
-      .attr("viewBox", `0 0 ${width} ${height}`)
-      .attr("style", "max-width: 100%; height: auto;");
-
-    // Background
-    svg.append("rect")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("fill", "#FFE1A8");
-
-    // Create main group
-    const g = svg.append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    // Define clip paths for circular images
-    const defs = svg.append("defs");
-    
-    root.descendants().forEach((d, i) => {
-      defs.append("clipPath")
-        .attr("id", `clip-${i}`)
-        .append("circle")
-        .attr("cx", 0)
-        .attr("cy", 0)
-        .attr("r", 30); // Image clip radius
-    });
-
-    // Color palette for different recipes
-    const colors = ["#8B4513", "#D2691E", "#CD853F", "#A0522D", "#B8860B", "#654321", "#8B6914", "#A0522D"];
-    
-    // Draw elbow-style links with error handling
     try {
+      // Normalize the tree structure for consistent property access
+      const normalizedData = normalizeTree(data);
+      
+      if (!normalizedData) {
+        console.error("Failed to normalize tree data");
+        return;
+      }
+      
+      const treeDepth = getTreeDepth(data);
+      const treeWidth = getTreeWidth(data);
+      const circleRadius = 45; // Circle radius
+      
+      // Adjust spacing based on mode
+      const horizontalSpacing = mode === "multiple" ? 350 : 250;
+      const verticalSpacing = 200;
+      
+      // Calculate dimensions
+      const width = Math.max(1600, treeWidth * horizontalSpacing);
+      const height = Math.max(800, (treeDepth + 1) * verticalSpacing);
+      const margin = { top: 100, right: 150, bottom: 100, left: 150 };
+
+      // Create hierarchy with the normalized data
+      const root = d3.hierarchy(normalizedData, d => d.children);
+      
+      // Create tree layout
+      const treeLayout = d3.tree()
+        .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
+        .separation((a, b) => {
+          // Increase separation for multiple recipes
+          if (mode === "multiple" && a.parent === root && b.parent === root) {
+            return 3;
+          }
+          return a.parent === b.parent ? 1 : 2;
+        });
+      
+      // Apply the tree layout
+      treeLayout(root);
+
+      // Invert y coordinates (top to bottom)
+      root.descendants().forEach((d) => {
+        d.y = (height - margin.top - margin.bottom) - d.y;
+      });
+
+      // Create SVG
+      const svg = d3.select(ref.current)
+        .attr("width", width)
+        .attr("height", height)
+        .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("style", "max-width: 100%; height: auto;");
+
+      // Background
+      svg.append("rect")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("fill", "#FFE1A8");
+
+      // Create main group
+      const g = svg.append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+
+      // Define clip paths for circular images
+      const defs = svg.append("defs");
+      
+      root.descendants().forEach((d, i) => {
+        defs.append("clipPath")
+          .attr("id", `clip-${i}`)
+          .append("circle")
+          .attr("cx", 0)
+          .attr("cy", 0)
+          .attr("r", 30); // Image clip radius
+      });
+
+      // Color palette for different recipes
+      const colors = ["#8B4513", "#D2691E", "#CD853F", "#A0522D", "#B8860B", "#654321", "#8B6914", "#A0522D"];
+      
+      // Draw links - with error protection
       g.selectAll("path.link")
         .data(root.links())
         .join("path")
@@ -332,30 +383,40 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         .attr("class", "node")
         .attr("transform", d => `translate(${d.x},${d.y})`);
 
-      // Add circles for nodes (bigger like in paste.txt)
+      // Add circles for nodes with proper coloring
       nodes.append("circle")
         .attr("r", circleRadius)
         .attr("fill", d => {
-          const elementName = d.data.root || d.data.Root || d.data.name || d.data.element || "";
-          const basicElements = ["Air", "Earth", "Fire", "Water"];
+          const elementName = d.data.name;
           
           // Special color for multiple root node
-          if (mode === "multiple" && d.data.isMultipleRoot) {
+          if (mode === "multiple" && data.isMultipleRoot && d === root) {
             return "#4B0082"; // Indigo for the main target
           }
-          return basicElements.includes(elementName) ? "#6B8E23" : "#A6352B";
+          
+          // Check if this is one of the special elements that should be purple
+          if (specialElements.includes(elementName)) {
+            return "#800080"; // Purple for special elements
+          }
+          
+          // Original colors for other elements
+          if (basicElements.includes(elementName)) {
+            return "#6B8E23"; // Green for basic elements
+          }
+          
+          return "#A6352B"; // Red for other elements
         })
         .attr("stroke", "#333")
         .attr("stroke-width", 2);
 
-      // Add images inside circles (positioned in upper part)
+      // Add images inside circles
       nodes.each(function(d, i) {
-        const elementName = d.data.root || d.data.Root || d.data.name || d.data.element || "";
+        const elementName = d.data.name;
         const imageSrc = elementImageMap[elementName];
         const node = d3.select(this);
         
         if (imageSrc) {
-          const image = node.append("image")
+          node.append("image")
             .attr("xlink:href", imageSrc)
             .attr("x", -22.5) // Center the image
             .attr("y", -30) // Position in upper part of circle
@@ -369,18 +430,18 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         }
       });
 
-      // Add text inside circle (positioned in lower part)
+      // Add text inside circle
       nodes.append("text")
         .attr("y", 20) // Position in lower part of circle
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
         .text((d) => {
-          const name = d.data.root || d.data.Root || d.data.name || d.data.element || "";
+          const name = d.data.name;
           // Truncate long names
           return name.length > 10 ? name.substring(0, 9) + "..." : name;
         })
         .attr("font-size", 14)
-        .attr("fill", "white") // White text to contrast with dark background
+        .attr("fill", "white")
         .attr("font-weight", "bold");
 
       // Add recipe labels for multiple mode
@@ -409,17 +470,9 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           .attr("fill", "#333")
           .text(`All Recipes for ${target}`);
       }
-    } catch (renderError) {
-      console.error("Error rendering tree:", renderError);
-      
-      // Display error message on the SVG
-      svg.append("text")
-        .attr("x", width / 2)
-        .attr("y", height / 2)
-        .attr("text-anchor", "middle")
-        .attr("font-size", 18)
-        .attr("fill", "red")
-        .text(`Error rendering tree: ${renderError.message}`);
+    } catch (err) {
+      console.error("Error rendering tree:", err);
+      setError(`Error rendering tree: ${err.message}`);
     }
   };
 
