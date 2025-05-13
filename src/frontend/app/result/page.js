@@ -128,6 +128,12 @@ export default function ResultPage() {
     effectiveQuantity 
   });
 
+  // Fungsi untuk navigasi ke halaman pencarian yang sesuai dengan mode dan algoritma
+  const handleSearchAnotherElement = () => {
+    const destinationMode = effectiveMode === "multiple" ? "multiplerecipes" : "shortestrecipe";
+    router.push(`/${destinationMode}?algo=${effectiveAlgo}`);
+  };
+
   if (error) {
     return (
       <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
@@ -153,6 +159,10 @@ export default function ResultPage() {
           <Heading>Eureka! Here's Your Alchemy Route</Heading>
           <Paragraph>
             You searched, I conjured, and here it is — your magical recipe revealed!
+          </Paragraph>
+          <Paragraph>
+            Using <strong>{effectiveAlgo}</strong> algorithm in <strong>{effectiveMode}</strong> mode
+            {effectiveMode === "multiple" && ` (max ${effectiveQuantity} recipes)`}
           </Paragraph>
         </div>
 
@@ -193,7 +203,7 @@ export default function ResultPage() {
           <PrimaryButton label="Back To Home" onClick={() => router.push("/")} />
           <SecondaryButton 
             label="Search Another Element" 
-            onClick={() => router.push(effectiveMode === "multiple" ? "/multiplerecipes" : "/shortestrecipe")} 
+            onClick={handleSearchAnotherElement} 
           />
         </div>
       </div>
