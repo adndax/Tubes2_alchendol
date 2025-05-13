@@ -1,18 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-    "fmt"
-    "time"
-    "context"
+	"time"
+
+	"Tubes2_alchendol/models"
+	"Tubes2_alchendol/search"
 
 	"github.com/gin-gonic/gin"
-	"Tubes2_alchendol/search"
-    "Tubes2_alchendol/models"
 )
 
 func LoadRecipeData() ([]models.Element, error) {
@@ -47,16 +48,16 @@ func SearchHandler(c *gin.Context) {
     fmt.Printf("[%s] Received parameters: algo=%s, target=%s, mode=%s, multiple=%s, maxRecipes=%s\n", 
         requestID, algo, target, mode, multipleStr, maxRecipesStr)
 
-    if target == "" {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
-        return
-    }
+	if target == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
+		return
+	}
 
-    elements, err := LoadRecipeData()
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal load recipes"})
-        return
-    }
+	elements, err := LoadRecipeData()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal load recipes"})
+		return
+	}
 
     // Determine target element's tier for timeout calculation
     targetTier := 0
@@ -258,15 +259,6 @@ func SearchHandler(c *gin.Context) {
         }
     
     case "BFS":
-        // Add BFS implementation when available
-        if multiple {
-            // Multiple BFS - to be implemented
-            c.JSON(http.StatusNotImplemented, gin.H{"error": "Multiple BFS belum diimplementasi"})
-        } else {
-            // Single BFS - to be implemented  
-            c.JSON(http.StatusNotImplemented, gin.H{"error": "BFS belum diimplementasi"})
-        }
-
 	case "bidirectional":
 		if multiple {
 			// Multiple Bidirectional - now implemented
