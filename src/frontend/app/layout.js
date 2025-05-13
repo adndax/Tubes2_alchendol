@@ -15,14 +15,16 @@ const poppins = Poppins({
 });
 
 export const metadata = {
-  title: "Your App Title",
-  description: "Your app description",
+  title: "Alchendol",
+  description: "Website for researching recipes in Little Alchemy 2",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
+        <link rel="icon" 
+        href="./img/alchendol_logo.png" />
         <link
           href="https://fonts.googleapis.com/css2?family=Baloo+2&family=Poppins&display=swap"
           rel="stylesheet"
