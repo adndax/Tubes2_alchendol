@@ -5,18 +5,19 @@ import { SubheadingRed } from "./Typography";
 export default function QuantityInput({ value = 1, onChange }) {
   const [quantity, setQuantity] = useState(value);
 
-  // Ensure the initial value is at least 1
-  useEffect(() => {
-    if (value < 1) {
-      update(1);
-    }
-  }, []);
 
   const update = (val) => {
     const num = Math.max(1, val); // Changed from 0 to 1 for minimum value
     setQuantity(num);
     onChange?.(num);
   };
+
+  // Ensure the initial value is at least 1
+  useEffect(() => {
+    if (value < 1) {
+      update(1);
+    }
+  }, [value, update]);
 
   const handleInput = (e) => {
     const val = e.target.value;

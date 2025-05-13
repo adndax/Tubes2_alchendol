@@ -7,7 +7,7 @@ import (
     
     "github.com/gin-gonic/gin"
     "github.com/gin-contrib/cors"
-    
+   
     "Tubes2_alchendol/api"
     "Tubes2_alchendol/search"
 )
@@ -36,7 +36,7 @@ func main() {
     
     // Setup API routes
     r.GET("/api/search", api.SearchHandler)
-    
+   
     // Terminal-based interface
     if len(os.Args) > 1 && os.Args[1] == "--cli" {
         runCLI()
