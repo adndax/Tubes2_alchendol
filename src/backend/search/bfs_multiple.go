@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,22 +14,17 @@ import (
 )
 
 func MultipleBFS(target string, elements []models.Element, maxRecipes int) ([]models.RecipeTree, float64, int) {
-	// Cap maximum recipes at a reasonable number
-	if maxRecipes > 100 {
-		maxRecipes = 100
-	}
-	
 	startTime := time.Now()
 	
-	// Determine timeout based on element complexity
-	timeoutDuration := 15 * time.Second // Default timeout
+	// Tingkatkan timeout untuk elemen kompleks
+	timeoutDuration := 120 * time.Second // Tingkatkan dari 15/30/60 ke 120 detik
 	for _, el := range elements {
 		if el.Name == target {
 			// Complex elements get more time based on tier
 			if el.Tier > 5 {
-				timeoutDuration = 60 * time.Second
+				timeoutDuration = 180 * time.Second // 3 menit untuk tier tinggi
 			} else if el.Tier > 3 {
-				timeoutDuration = 30 * time.Second
+				timeoutDuration = 120 * time.Second // 2 menit untuk tier menengah
 			}
 			break
 		}
@@ -61,14 +57,13 @@ func MultipleBFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		return []models.RecipeTree{basicTree}, time.Since(startTime).Seconds(), 1
 	}
 	
-	// Track results and nodes visited
+	// Gunakan atomic counter untuk node visited
+	var totalNodesVisited int64 = 0
+	
+	// Hasil recipes dan map untuk menjaga keunikan
 	var results []models.RecipeTree
 	var uniqueRecipes = make(map[string]bool)
-	var totalNodesVisited int32 = 0 // Akan diinkremen di setiap langkah pencarian
 	var resultsMutex sync.Mutex
-	
-	// Create atomic counter for unique recipes found
-	var uniqueRecipesCounter int32 = 0
 	
 	// Get all direct recipes for the target
 	targetElements, found := elementMap[target]
@@ -77,76 +72,10 @@ func MultipleBFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		return []models.RecipeTree{}, time.Since(startTime).Seconds(), 0
 	}
 	
-	// Create a channel for recipe trees from workers
-	treeChannel := make(chan models.RecipeTree, 100)
-	
-	// Create a channel for reporting nodes visited
-	visitedChannel := make(chan int, 100)
-	
-	// Signal channel for early termination
-	done := make(chan struct{})
-	
-	// Worker counter
-	var waitGroup sync.WaitGroup
-	
-	// Start a goroutine to collect node visit counts
-	go func() {
-		for count := range visitedChannel {
-			atomic.AddInt32(&totalNodesVisited, int32(count))
-		}
-	}()
-	
-	// Start a collector goroutine to process the trees
-	go func() {
-		for tree := range treeChannel {
-			if tree.Root == "" {
-				continue
-			}
-			
-			resultsMutex.Lock()
-			
-			// Check if we've reached max recipes
-			if len(results) >= maxRecipes {
-				resultsMutex.Unlock()
-				continue
-			}
-			
-			// Generate a unique key for this tree
-			treeKey := generateBFSTreeKey(tree)
-			
-			// Only add if we haven't seen this tree before
-			if !uniqueRecipes[treeKey] {
-				uniqueRecipes[treeKey] = true
-				results = append(results, tree)
-				
-				// Increment our atomic counter for unique recipes
-				newCount := atomic.AddInt32(&uniqueRecipesCounter, 1)
-				
-				// Tampilkan juga jumlah node yang dikunjungi
-				nodeCount := atomic.LoadInt32(&totalNodesVisited)
-				fmt.Printf("Added recipe %d/%d: %s = %s + %s (Unique tree: %d, NodesVisited: %d)\n", 
-					len(results), maxRecipes, tree.Root, tree.Left, tree.Right, newCount, nodeCount)
-				
-				// If we've reached max recipes, signal done
-				if len(results) >= maxRecipes {
-					select {
-					case done <- struct{}{}:
-					default:
-					}
-				}
-			}
-			
-			resultsMutex.Unlock()
-		}
-	}()
-
-	// First, process all direct recipe combinations
+	// Kumpulkan semua kombinasi untuk target
+	var allCombinations [][]string
 	processedCombos := make(map[string]bool)
-	var directCombinations []struct {
-		Comp1, Comp2 string
-	}
 	
-	// Collect unique direct combinations
 	for _, element := range targetElements {
 		if len(element.Recipes) != 2 {
 			continue
@@ -168,100 +97,150 @@ func MultipleBFS(target string, elements []models.Element, maxRecipes int) ([]mo
 		}
 		
 		processedCombos[comboKey] = true
-		directCombinations = append(directCombinations, struct {
-			Comp1, Comp2 string
-		}{
-			Comp1: comp1,
-			Comp2: comp2,
-		})
+		allCombinations = append(allCombinations, []string{comp1, comp2})
 	}
 	
-	fmt.Printf("Found %d unique direct combinations for %s\n", len(directCombinations), target)
+	fmt.Printf("Found %d unique direct combinations for %s\n", len(allCombinations), target)
 	
-	// Process each direct combination
-	for i, combo := range directCombinations {
-		// Check for early termination or timeout
-		select {
-		case <-done:
-			fmt.Printf("Found all %d requested recipes, skipping additional combinations\n", maxRecipes)
-			goto ProcessComplete
-		case <-ctx.Done():
-			fmt.Println("Context timeout reached, using results gathered so far")
-			goto ProcessComplete
-		default:
-			// Continue processing
-		}
-		
-		waitGroup.Add(1)
-		
-		go func(index int, c1, c2 string) {
-			defer waitGroup.Done()
+	// Channel untuk mengumpulkan hasil - tingkatkan buffer size
+	resultChan := make(chan models.RecipeTree, 1000)
+	
+	// Channel untuk sinyal done
+	doneChan := make(chan struct{})
+	
+	// Mulai collector goroutine
+	go func() {
+		treesProcessed := 0
+		for tree := range resultChan {
+			if tree.Root == "" {
+				continue
+			}
 			
-			// Create a recipe tree using BFS for this combination
-			tree := bfsCreateRecipeTree(target, c1, c2, elementMap, visitedChannel)
+			// Generate a unique key for this tree
+			treeKey := generateBFSTreeKey(tree)
 			
-			// Send the tree to the channel if valid
-			if tree.Root != "" {
-				select {
-				case treeChannel <- tree:
-				case <-ctx.Done():
-					return
-				case <-done:
-					return
+			resultsMutex.Lock()
+			
+			// Check if we've reached max recipes
+			if len(results) >= maxRecipes {
+				resultsMutex.Unlock()
+				continue
+			}
+			
+			// Only add if we haven't seen this tree before
+			if !uniqueRecipes[treeKey] {
+				uniqueRecipes[treeKey] = true
+				results = append(results, tree)
+				
+				// Log progress dengan lebih efisien
+				treesProcessed++
+				if treesProcessed % 10 == 0 || treesProcessed < 10 {
+					fmt.Printf("Added recipe %d/%d: %s = %s + %s (NodesVisited: %d)\n", 
+						len(results), maxRecipes, tree.Root, tree.Left, tree.Right, 
+						atomic.LoadInt64(&totalNodesVisited))
+				}
+				
+				// If we've reached max recipes, signal done
+				if len(results) >= maxRecipes {
+					select {
+					case doneChan <- struct{}{}:
+					default:
+					}
 				}
 			}
 			
-			// Now explore alternative trees for this combination's components
-			bfsExploreAlternativeTrees(target, c1, c2, elementMap, treeChannel, visitedChannel, ctx, done)
-			
-		}(i, combo.Comp1, combo.Comp2)
-	}
-	
-	// Wait for all workers to finish or timeout
-	go func() {
-		waitGroup.Wait()
-		close(treeChannel)
-		close(visitedChannel)
+			resultsMutex.Unlock()
+		}
 	}()
 	
-	// Wait for completion or timeout
-	select {
-	case <-ctx.Done():
-		fmt.Println("Processing timed out, using results gathered so far")
-	case <-done:
-		fmt.Printf("Found all %d requested recipes\n", maxRecipes)
+	// Gunakan worker pool untuk pemrosesan paralel yang lebih efisien
+	combinationChan := make(chan []string, len(allCombinations))
+	var wg sync.WaitGroup
+	
+	// Jumlah worker berdasarkan CPU
+	workerCount := runtime.NumCPU()
+	fmt.Printf("Starting %d workers for processing combinations\n", workerCount)
+	
+	// Start worker goroutines
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			
+			// Buat cache lokal untuk worker ini untuk menyimpan path yang ditemukan
+			localPathCache := make(map[string]models.RecipeTree)
+			
+			for combo := range combinationChan {
+				// Check for early termination
+				select {
+				case <-ctx.Done():
+					return
+				case <-doneChan:
+					return
+				default:
+					// Continue processing
+				}
+				
+				// Get component elements
+				comp1 := combo[0]
+				comp2 := combo[1]
+				
+				// Cek tier constraint
+				targetTier := getElementTier(target, elementMap)
+				comp1Tier := getElementTier(comp1, elementMap)
+				comp2Tier := getElementTier(comp2, elementMap)
+				
+				if comp1Tier >= targetTier || comp2Tier >= targetTier {
+					continue
+				}
+				
+				// Proses kombinasi dengan cara BFS yang lebih efisien
+				bfsProcessCombinationWithVariations(
+					target, comp1, comp2, elementMap, 
+					resultChan, ctx, doneChan, &totalNodesVisited, localPathCache)
+			}
+		}(i)
 	}
 	
-ProcessComplete:
-	// Wait up to 5 seconds for workers to complete, then return what we've got
-	cleanupTimeout := time.After(5 * time.Second)
-	select {
-	case <-func() chan struct{} {
-		done := make(chan struct{})
-		go func() {
-			waitGroup.Wait()
-			close(done)
-		}()
-		return done
-	}():
-		fmt.Println("All workers completed normally")
-	case <-cleanupTimeout:
-		fmt.Println("Some workers still running, proceeding with results collected so far")
-	case <-ctx.Done():
-		fmt.Println("Main context timeout, returning available results")
+	// Kirim kombinasi ke channel untuk diproses
+	for _, combo := range allCombinations {
+		combinationChan <- combo
 	}
+	close(combinationChan)
+	
+	// Tunggu semua worker selesai
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+	
+	// Tunggu sampai context done, atau doneChan signal, atau semua worker selesai
+	select {
+	case <-ctx.Done():
+		fmt.Println("Context timeout reached, using results gathered so far")
+	case <-doneChan:
+		fmt.Printf("Found all %d requested recipes\n", maxRecipes)
+	case <-func() chan struct{} {
+		ch := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(ch)
+		}()
+		return ch
+	}():
+		fmt.Println("All combinations processed")
+	}
+	
+	// Wait a bit for the collector to finish
+	cleanupTimeout := time.After(2 * time.Second)
+	<-cleanupTimeout
 	
 	// Debug output if enabled
 	if os.Getenv("DEBUG_RECIPES") == "1" && len(results) > 1 {
 		DebugDisplayRecipeDifferences(results)
 	}
 	
-	// Get the final count of unique recipes found
-	finalUniqueCount := atomic.LoadInt32(&uniqueRecipesCounter)
-	finalNodesVisited := atomic.LoadInt32(&totalNodesVisited)
-	
-	fmt.Printf("Total unique recipe combinations found: %d\n", finalUniqueCount)
-	fmt.Printf("Total nodes visited during search: %d\n", finalNodesVisited)
+	finalNodesVisited := atomic.LoadInt64(&totalNodesVisited)
 	
 	fmt.Printf("MultipleBFS returning %d recipes for %s with %d nodes visited\n", 
 		len(results), target, finalNodesVisited)
@@ -269,58 +248,302 @@ ProcessComplete:
 	return results, time.Since(startTime).Seconds(), int(finalNodesVisited)
 }
 
-// BFS for creating a recipe tree from a given combination
-func bfsCreateRecipeTree(target, comp1, comp2 string, elementMap map[string][]models.Element, visitedChannel chan<- int) models.RecipeTree {
-	// Increment visit count
-	visitedChannel <- 1
+// Proses kombinasi dengan variasi menggunakan BFS
+func bfsProcessCombinationWithVariations(
+	target, comp1, comp2 string, 
+	elementMap map[string][]models.Element,
+	resultChan chan<- models.RecipeTree,
+	ctx context.Context,
+	doneChan <-chan struct{},
+	totalNodesVisited *int64,
+	pathCache map[string]models.RecipeTree) {
 	
-	// Check tier constraints
+	// Increment visit counter
+	atomic.AddInt64(totalNodesVisited, 1)
+	
+	// Get target tier
 	targetTier := getElementTier(target, elementMap)
-	comp1Tier := getElementTier(comp1, elementMap)
-	comp2Tier := getElementTier(comp2, elementMap)
 	
-	if comp1Tier >= targetTier || comp2Tier >= targetTier {
-		return models.RecipeTree{}
+	// Cari variasi untuk komponen pertama dengan BFS yang efisien
+	comp1Variations := findBFSComponentVariations(
+		comp1, elementMap, ctx, doneChan, totalNodesVisited, pathCache)
+	
+	// Check for termination
+	select {
+	case <-ctx.Done():
+		return
+	case <-doneChan:
+		return
+	default:
 	}
 	
-	// Create root node for the target
-	root := models.RecipeTree{
-		Root:     target,
-		Left:     comp1,
-		Right:    comp2,
-		Tier:     fmt.Sprintf("%d", targetTier),
-		Children: []models.RecipeTree{},
+	// Cari variasi untuk komponen kedua dengan BFS yang efisien
+	comp2Variations := findBFSComponentVariations(
+		comp2, elementMap, ctx, doneChan, totalNodesVisited, pathCache)
+	
+	// Check for termination
+	select {
+	case <-ctx.Done():
+		return
+	case <-doneChan:
+		return
+	default:
 	}
 	
-	// Perform BFS for each component
-	comp1Tree := bfsSearchComponent(comp1, elementMap, visitedChannel)
-	comp2Tree := bfsSearchComponent(comp2, elementMap, visitedChannel)
+	// Batasi jumlah kombinasi untuk mencegah ledakan
+	maxCombosPerPair := 200
+	combinationCount := 0
 	
-	// If either component search failed, return empty tree
-	if comp1Tree.Root == "" || comp2Tree.Root == "" {
-		return models.RecipeTree{}
+	// Kombinasikan semua variasi komponen untuk membuat resep lengkap
+	for _, v1 := range comp1Variations {
+		// Cek terminasi secara periodik
+		if combinationCount % 10 == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-doneChan:
+				return
+			default:
+			}
+		}
+		
+		for _, v2 := range comp2Variations {
+			// Buat resep tree dengan variasi ini
+			recipeTree := models.RecipeTree{
+				Root:     target,
+				Left:     comp1,
+				Right:    comp2,
+				Tier:     fmt.Sprintf("%d", targetTier),
+				Children: []models.RecipeTree{v1, v2},
+			}
+			
+			// Kirim ke channel
+			select {
+			case resultChan <- recipeTree:
+				atomic.AddInt64(totalNodesVisited, 1)
+			case <-ctx.Done():
+				return
+			case <-doneChan:
+				return
+			default:
+				// Channel full, skip
+			}
+			
+			combinationCount++
+			if combinationCount >= maxCombosPerPair {
+				break
+			}
+		}
+		
+		if combinationCount >= maxCombosPerPair {
+			break
+		}
 	}
-	
-	// Add component trees as children
-	root.Children = append(root.Children, comp1Tree, comp2Tree)
-	
-	return root
 }
 
-// BFS search for a component recipe path
-func bfsSearchComponent(element string, elementMap map[string][]models.Element, visitedChannel chan<- int) models.RecipeTree {
-	// Increment visit count
-	visitedChannel <- 1
+// Temukan variasi komponen dengan BFS yang efisien
+func findBFSComponentVariations(
+	element string,
+	elementMap map[string][]models.Element,
+	ctx context.Context,
+	doneChan <-chan struct{},
+	totalNodesVisited *int64,
+	pathCache map[string]models.RecipeTree) []models.RecipeTree {
 	
-	// If element is basic, return directly
+	// Increment visit counter
+	atomic.AddInt64(totalNodesVisited, 1)
+	
+	// Check for termination
+	select {
+	case <-ctx.Done():
+		return []models.RecipeTree{}
+	case <-doneChan:
+		return []models.RecipeTree{}
+	default:
+	}
+	
+	// Cek cache untuk element ini
+	if cachedTree, found := pathCache[element]; found {
+		return []models.RecipeTree{cachedTree}
+	}
+	
+	// Jika element adalah basic, langsung return
 	if IsBasicElement(element) {
-		return models.RecipeTree{
+		basicTree := models.RecipeTree{
 			Root:     element,
 			Left:     "",
 			Right:    "",
 			Tier:     "0",
 			Children: []models.RecipeTree{},
 		}
+		
+		pathCache[element] = basicTree
+		return []models.RecipeTree{basicTree}
+	}
+	
+	// Get element tier
+	elementTier := getElementTier(element, elementMap)
+	
+	// Gunakan BFS untuk temukan variasi resep
+	var variations []models.RecipeTree
+	
+	// Gunakan batas yang tinggi - tidak terbatas
+	maxVariationsPerElement := 100 // Tingkatkan dari 5 ke 100
+	
+	// Get recipes untuk element ini
+	elementRecipes, found := elementMap[element]
+	if !found || len(elementRecipes) == 0 {
+		return []models.RecipeTree{}
+	}
+	
+	// Track recipe combinations yang sudah diproses
+	processedCombos := make(map[string]bool)
+	
+	// Proses setiap resep
+	for _, recipe := range elementRecipes {
+		// Cek jika sudah mencapai batas variasi
+		if len(variations) >= maxVariationsPerElement {
+			break
+		}
+		
+		if len(recipe.Recipes) != 2 {
+			continue
+		}
+		
+		subComp1 := recipe.Recipes[0]
+		subComp2 := recipe.Recipes[1]
+		
+		// Buat key unik untuk kombinasi ini
+		var comboKey string
+		if subComp1 < subComp2 {
+			comboKey = subComp1 + "+" + subComp2
+		} else {
+			comboKey = subComp2 + "+" + subComp1
+		}
+		
+		// Skip jika sudah diproses
+		if processedCombos[comboKey] {
+			continue
+		}
+		processedCombos[comboKey] = true
+		
+		// Cek tier constraint
+		subComp1Tier := getElementTier(subComp1, elementMap)
+		subComp2Tier := getElementTier(subComp2, elementMap)
+		
+		if subComp1Tier >= elementTier || subComp2Tier >= elementTier {
+			continue
+		}
+		
+		// Dapatkan variasi untuk subcomponents dengan BFS
+		subComp1Variations := findBFSComponentVariations(
+			subComp1, elementMap, ctx, doneChan, totalNodesVisited, pathCache)
+		
+		// Check for termination
+		select {
+		case <-ctx.Done():
+			return variations
+		case <-doneChan:
+			return variations
+		default:
+		}
+		
+		// Skip jika tidak ada variasi
+		if len(subComp1Variations) == 0 {
+			continue
+		}
+		
+		subComp2Variations := findBFSComponentVariations(
+			subComp2, elementMap, ctx, doneChan, totalNodesVisited, pathCache)
+		
+		// Check for termination
+		select {
+		case <-ctx.Done():
+			return variations
+		case <-doneChan:
+			return variations
+		default:
+		}
+		
+		// Skip jika tidak ada variasi
+		if len(subComp2Variations) == 0 {
+			continue
+		}
+		
+		// Batasi kombinasi per resep untuk menghindari ledakan
+		maxCombosPerRecipe := 20
+		combosAdded := 0
+		
+		// Kombinasikan variasi subkomponen
+		for _, v1 := range subComp1Variations {
+			if len(variations) >= maxVariationsPerElement {
+				break
+			}
+			
+			for _, v2 := range subComp2Variations {
+				if len(variations) >= maxVariationsPerElement {
+					break
+				}
+				
+				if combosAdded >= maxCombosPerRecipe {
+					break
+				}
+				
+				// Buat tree dengan variasi ini
+				tree := models.RecipeTree{
+					Root:     element,
+					Left:     subComp1,
+					Right:    subComp2,
+					Tier:     fmt.Sprintf("%d", elementTier),
+					Children: []models.RecipeTree{v1, v2},
+				}
+				
+				variations = append(variations, tree)
+				combosAdded++
+			}
+			
+			if combosAdded >= maxCombosPerRecipe {
+				break
+			}
+		}
+	}
+	
+	// Cache hasil jika tidak kosong
+	if len(variations) > 0 {
+		pathCache[element] = variations[0]
+	}
+	
+	return variations
+}
+
+// Implementasi bfsSearchComponent yang efisien menggunakan BFS untuk menentukan satu path
+// dan menyimpan hasilnya di cache
+func efficientBfsSearchComponent(
+	element string, 
+	elementMap map[string][]models.Element, 
+	totalNodesVisited *int64,
+	pathCache map[string]models.RecipeTree) models.RecipeTree {
+	
+	// Increment visit counter
+	atomic.AddInt64(totalNodesVisited, 1)
+	
+	// Check cache
+	if cachedTree, found := pathCache[element]; found {
+		return cachedTree
+	}
+	
+	// If element is basic, return directly
+	if IsBasicElement(element) {
+		basicTree := models.RecipeTree{
+			Root:     element,
+			Left:     "",
+			Right:    "",
+			Tier:     "0",
+			Children: []models.RecipeTree{},
+		}
+		
+		pathCache[element] = basicTree
+		return basicTree
 	}
 	
 	// Get element tier
@@ -349,7 +572,7 @@ func bfsSearchComponent(element string, elementMap map[string][]models.Element, 
 	for queue.Len() > 0 {
 		// Get next element from queue
 		current := queue.Remove(queue.Front()).(string)
-		visitedChannel <- 1
+		atomic.AddInt64(totalNodesVisited, 1)
 		
 		// Get current node
 		currentNode := nodeMap[current]
@@ -430,12 +653,22 @@ func bfsSearchComponent(element string, elementMap map[string][]models.Element, 
 	}
 	
 	// Build complete tree from nodeMap
-	return buildTreeFromNodeMap(element, nodeMap)
+	result := buildTreeFromNodeMap(element, nodeMap)
+	
+	// Cache the result
+	if result.Root != "" {
+		pathCache[element] = result
+	}
+	
+	return result
 }
 
 // Build a complete tree from the node map
 func buildTreeFromNodeMap(root string, nodeMap map[string]models.RecipeTree) models.RecipeTree {
-	result := nodeMap[root]
+	result, exists := nodeMap[root]
+	if !exists {
+		return models.RecipeTree{}
+	}
 	
 	// If this is a basic element or has no children, return as is
 	if result.Left == "" || result.Right == "" {
@@ -446,212 +679,15 @@ func buildTreeFromNodeMap(root string, nodeMap map[string]models.RecipeTree) mod
 	leftChild := buildTreeFromNodeMap(result.Left, nodeMap)
 	rightChild := buildTreeFromNodeMap(result.Right, nodeMap)
 	
+	// Skip if any child is invalid
+	if leftChild.Root == "" || rightChild.Root == "" {
+		return models.RecipeTree{}
+	}
+	
 	// Add children to result
 	result.Children = []models.RecipeTree{leftChild, rightChild}
 	
 	return result
-}
-
-// Explore alternative trees using BFS
-func bfsExploreAlternativeTrees(target, comp1, comp2 string, elementMap map[string][]models.Element, 
-	treeChannel chan<- models.RecipeTree, visitedChannel chan<- int, ctx context.Context, done <-chan struct{}) {
-	
-	// Check for context cancellation or done signal
-	select {
-	case <-ctx.Done():
-		return
-	case <-done:
-		return
-	default:
-		// Continue
-	}
-	
-	// Count this function call as a node visit
-	visitedChannel <- 1
-	
-	// Get target tier
-	targetTier := getElementTier(target, elementMap)
-	
-	// Skip basic elements
-	if IsBasicElement(comp1) && IsBasicElement(comp2) {
-		return
-	}
-	
-	// Find all alternative recipes for the first component
-	if !IsBasicElement(comp1) && comp1 != target { // Avoid cycles
-		bfsExploreComponentCombinations(comp1, elementMap, visitedChannel, func(altComp1Tree models.RecipeTree) {
-			// Find a standard path for comp2 using BFS
-			comp2Tree := bfsSearchComponent(comp2, elementMap, visitedChannel)
-			
-			if comp2Tree.Root == "" {
-				return
-			}
-			
-			// Create the full tree with this alternative
-			fullTree := models.RecipeTree{
-				Root:  target,
-				Left:  comp1,
-				Right: comp2,
-				Tier:  fmt.Sprintf("%d", targetTier),
-				Children: []models.RecipeTree{
-					altComp1Tree,
-					comp2Tree,
-				},
-			}
-			
-			// Send to the channel
-			select {
-			case treeChannel <- fullTree:
-			case <-ctx.Done():
-				return
-			case <-done:
-				return
-			default:
-				// Channel full, skip
-			}
-		})
-	}
-	
-	// Find all alternative recipes for the second component
-	if !IsBasicElement(comp2) && comp2 != target { // Avoid cycles
-		bfsExploreComponentCombinations(comp2, elementMap, visitedChannel, func(altComp2Tree models.RecipeTree) {
-			// Find a standard path for comp1 using BFS
-			comp1Tree := bfsSearchComponent(comp1, elementMap, visitedChannel)
-			
-			if comp1Tree.Root == "" {
-				return
-			}
-			
-			// Create the full tree with this alternative
-			fullTree := models.RecipeTree{
-				Root:  target,
-				Left:  comp1,
-				Right: comp2,
-				Tier:  fmt.Sprintf("%d", targetTier),
-				Children: []models.RecipeTree{
-					comp1Tree,
-					altComp2Tree,
-				},
-			}
-			
-			// Send to the channel
-			select {
-			case treeChannel <- fullTree:
-			case <-ctx.Done():
-				return
-			case <-done:
-				return
-			default:
-				// Channel full, skip
-			}
-		})
-	}
-	
-	// Now try exploring even deeper combinations - variations of both components
-	if !IsBasicElement(comp1) && !IsBasicElement(comp2) && comp1 != target && comp2 != target {
-		// Count exploring deeper combinations as a node visit
-		visitedChannel <- 1
-		
-		// Find different combinations for both components
-		bfsExploreComponentCombinations(comp1, elementMap, visitedChannel, func(altComp1Tree models.RecipeTree) {
-			bfsExploreComponentCombinations(comp2, elementMap, visitedChannel, func(altComp2Tree models.RecipeTree) {
-				// Create a full tree with both alternative components
-				fullTree := models.RecipeTree{
-					Root:  target,
-					Left:  comp1,
-					Right: comp2,
-					Tier:  fmt.Sprintf("%d", targetTier),
-					Children: []models.RecipeTree{
-						altComp1Tree,
-						altComp2Tree,
-					},
-				}
-				
-				// Send to the channel
-				select {
-				case treeChannel <- fullTree:
-				case <-ctx.Done():
-					return
-				case <-done:
-					return
-				default:
-					// Channel full, skip
-				}
-			})
-		})
-	}
-}
-
-// Explore component combinations using BFS
-func bfsExploreComponentCombinations(component string, elementMap map[string][]models.Element, 
-	visitedChannel chan<- int, callback func(models.RecipeTree)) {
-	
-	// Count this function call as a node visit
-	visitedChannel <- 1
-	
-	// Get component tier
-	compTier := getElementTier(component, elementMap)
-	
-	// Get all recipes for this component
-	componentElements, found := elementMap[component]
-	if !found || len(componentElements) == 0 {
-		return
-	}
-	
-	// Try each recipe
-	processedCombos := make(map[string]bool)
-	
-	for _, element := range componentElements {
-		// Count each recipe iteration as a node visit
-		visitedChannel <- 1
-		
-		if len(element.Recipes) != 2 {
-			continue
-		}
-		
-		subComp1 := element.Recipes[0]
-		subComp2 := element.Recipes[1]
-		
-		// Skip if components don't exist
-		if _, exists := elementMap[subComp1]; !exists {
-			continue
-		}
-		if _, exists := elementMap[subComp2]; !exists {
-			continue
-		}
-		
-		// Create a unique key for this combination
-		var comboKey string
-		if subComp1 < subComp2 {
-			comboKey = subComp1 + "+" + subComp2
-		} else {
-			comboKey = subComp2 + "+" + subComp1
-		}
-		
-		// Skip if we've processed this combination
-		if processedCombos[comboKey] {
-			continue
-		}
-		
-		processedCombos[comboKey] = true
-		
-		// Check tier constraints
-		subComp1Tier := getElementTier(subComp1, elementMap)
-		subComp2Tier := getElementTier(subComp2, elementMap)
-		
-		// Skip tier violations
-		if subComp1Tier >= compTier || subComp2Tier >= compTier {
-			continue
-		}
-		
-		// Create tree for this combination using BFS
-		tree := bfsCreateRecipeTree(component, subComp1, subComp2, elementMap, visitedChannel)
-		
-		// Call the callback with this tree if valid
-		if tree.Root != "" {
-			callback(tree)
-		}
-	}
 }
 
 // Helper function to generate a BFS-style key for a tree
@@ -663,7 +699,7 @@ func generateBFSTreeKey(tree models.RecipeTree) string {
 
 func generateBFSTreeKeyHelper(tree models.RecipeTree, sb *strings.Builder, depth int) {
 	// Limit recursion depth
-	if depth > 10 {
+	if depth > 20 {
 		sb.WriteString(tree.Root)
 		return
 	}

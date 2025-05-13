@@ -12,9 +12,6 @@ import (
 // MultipleBidirectional searches for multiple recipes using concurrent bidirectional search with multithreading
 func MultipleBidirectional(target string, elements []models.Element, maxRecipes int) ([]models.RecipeTree, float64, int) {
 	// Cap maximum recipes at a reasonable number
-	if maxRecipes > 50 {
-		maxRecipes = 50
-	}
 
 	startTime := time.Now()
 

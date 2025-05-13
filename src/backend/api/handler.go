@@ -88,10 +88,6 @@ func SearchHandler(c *gin.Context) {
     if maxRecipesStr != "" {
         if max, err := strconv.Atoi(maxRecipesStr); err == nil {
             maxRecipes = max
-            // Safety cap for maxRecipes
-            if maxRecipes > 100 {
-                maxRecipes = 100
-            }
         }
     }
 
