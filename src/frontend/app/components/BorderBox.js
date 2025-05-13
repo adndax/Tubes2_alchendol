@@ -19,11 +19,23 @@ export const BorderBox = ({ children, className, height }) => (
   </div>
 );
 
-export const ElementBox = ({ name, imageSrc, mode = "shortest" }) => {
+export const ElementBox = ({ name, imageSrc, mode = "shortest", algo = "DFS" }) => {
   const router = useRouter();
 
+  // Fix for handling null algorithm
+  let safeAlgo = algo;
+  if (safeAlgo === "null" || safeAlgo === null || safeAlgo === undefined) {
+    safeAlgo = "DFS";
+  }
+
   const handleClick = () => {
-    router.push(`/search/${encodeURIComponent(name)}?mode=${mode}`);
+    // Always use a valid algorithm and properly encode parameters
+    const url = `/search/${encodeURIComponent(name)}?mode=${encodeURIComponent(mode)}&algo=${encodeURIComponent(safeAlgo)}`;
+    
+    // Debug - log the URL we're navigating to
+    console.log("ElementBox navigating to:", url);
+    
+    router.push(url);
   };
 
   return (

@@ -1,6 +1,7 @@
 "use client";
+import { Suspense } from "react";  // Make sure this import is present
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Heading, Paragraph } from "@/components/Typography";
 import RecipeToggle from "@/components/Toggle";
 import { PrimaryButton } from "@/components/Button";
@@ -8,16 +9,17 @@ import SearchBar from "@/components/SearchBar";
 import { ElementBox } from "@/components/BorderBox";
 import { elements } from "@data";
 
-export default function MultipleRecipes() {
-  const router = useRouter();
+function MultipleRecipesContent() {
+  const searchParams = useSearchParams();
+  const algo = searchParams.get("algo") || "null";
+  
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [mode, setMode] = useState("multiple");
 
   const itemsPerRow = 8;
   const rowsPerPage = 5;
   const itemsPerPage = itemsPerRow * rowsPerPage;
-
-  const [mode, setMode] = useState("multiple"); 
 
   const filteredElements = useMemo(() => {
     return elements.filter((el) =>
@@ -30,7 +32,7 @@ export default function MultipleRecipes() {
   const currentElements = useMemo(() => {
     const start = (page - 1) * itemsPerPage;
     return filteredElements.slice(start, start + itemsPerPage);
-  }, [page, filteredElements]);
+  }, [page, filteredElements, itemsPerPage]);
 
   const handleSearch = (query) => {
     setSearchQuery(query);
@@ -41,7 +43,11 @@ export default function MultipleRecipes() {
     <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
       <div className="flex flex-col items-center pt-20 gap-15 w-full pb-20">
         <div className="flex flex-col gap-2 items-center">
-          <Heading>Pick Your Quest Mode</Heading>
+          <Heading>
+            {algo !== "null"
+              ? `You Picked the ${algo.toUpperCase()} Spell!`
+              : "Pick Your Quest Mode"}
+          </Heading>
           <Paragraph>
             Now… do you want a fast recipe or a magical recipe hunt?
           </Paragraph>
@@ -52,7 +58,13 @@ export default function MultipleRecipes() {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 max-w-screen-xl">
           {currentElements.map((el, index) => (
-            <ElementBox key={index} name={el.name} imageSrc={el.imageSrc} mode={mode} />
+            <ElementBox
+              key={index}
+              name={el.name}
+              imageSrc={el.imageSrc}
+              mode={mode}
+              algo={algo}
+            />
           ))}
         </div>
 
@@ -73,5 +85,13 @@ export default function MultipleRecipes() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function MultipleRecipes() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <MultipleRecipesContent />
+    </Suspense>
   );
 }
