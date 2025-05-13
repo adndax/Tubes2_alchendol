@@ -4,6 +4,8 @@ import (
     "fmt"
     "os"
     "encoding/json"
+    "net/http"
+    "time"
     
     "github.com/gin-gonic/gin"
     "github.com/gin-contrib/cors"
@@ -34,8 +36,20 @@ func main() {
         })
     })
     
-    // Setup API routes
-    r.GET("/api/search", api.SearchHandler)
+
+    searchHandler := api.SearchHandler // Your existing handler
+    if os.Getenv("GIN_MODE") != "debug" {
+        // Apply timeout middleware in production
+        r.GET("/api/search", func(c *gin.Context) {
+            handler := TimeoutMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                searchHandler(c)
+            }), 60*time.Second)
+            handler.ServeHTTP(c.Writer, c.Request)
+        })
+    } else {
+        // Use regular handler in development
+        r.GET("/api/search", searchHandler)
+    }
     
     // Terminal-based interface
     if len(os.Args) > 1 && os.Args[1] == "--cli" {

@@ -52,7 +52,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     const formattedAlgo = algo.toUpperCase() === "BIDIRECTIONAL" ? "bidirectional" : algo.toUpperCase();
     
     // Build the correct URL with all parameters
-    let url = `http://localhost:8080/api/search?algo=${formattedAlgo}&target=${encodeURIComponent(target)}`;
+    let url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/search?algo=${formattedAlgo}&target=${encodeURIComponent(target)}`;
     
     // Important: Make sure we're passing maxRecipes correctly for multiple mode
     if (mode === "multiple") {
