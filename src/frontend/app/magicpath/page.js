@@ -53,7 +53,7 @@ export default function MagicPath() {
           />
 
           {showError && (
-            <Paragraph>
+            <Paragraph className="text-red-500 text-xs ml-2 font-bold">
               Pick a spell first!
             </Paragraph>
           )}
