@@ -10,6 +10,10 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   const [loading, setLoading] = useState(false);
   const [timeoutId, setTimeoutId] = useState(null);
   const [renderAttempted, setRenderAttempted] = useState(false);
+  // Tambahkan state untuk navigasi multiple recipe
+  const [recipes, setRecipes] = useState([]);
+  const [currentRecipeIndex, setCurrentRecipeIndex] = useState(0);
+  const [totalRecipes, setTotalRecipes] = useState(0);
 
   // Create a map for element images - simplified mapping
   const elementImageMap = {};
@@ -41,6 +45,9 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     setError(null);
     setTreeData(null);
     setRenderAttempted(false);
+    setRecipes([]);
+    setCurrentRecipeIndex(0);
+    setTotalRecipes(0);
 
     const formattedAlgo = algo.toUpperCase() === "BIDIRECTIONAL" ? "bidirectional" : algo.toUpperCase();
     
@@ -95,8 +102,13 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         if (mode === "multiple") {
           if (data.roots && Array.isArray(data.roots)) {
             if (data.roots.length > 0) {
-              // For multiple mode, create a parent node to hold all recipes
-              rootData = createMultipleRecipeTree(data.roots, target);
+              // Untuk multiple mode, simpan semua resep secara terpisah
+              setRecipes(data.roots);
+              setCurrentRecipeIndex(0);
+              setTotalRecipes(data.roots.length);
+              
+              // Pilih resep pertama untuk ditampilkan
+              rootData = data.roots[0];
               nodeCount = data.nodesVisited || countNodesInTree(rootData);
             } else {
               // When we have an empty array, show a friendly message
@@ -123,7 +135,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         setTreeData(rootData);
 
         if (onStatsUpdate) {
-            const timeMs = data.timeElapsed || 0;
+          const timeMs = data.timeElapsed || 0;
           onStatsUpdate({ nodeCount, timeMs });
         }
 
@@ -146,6 +158,14 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       }
     };
   }, [target, algo, mode, maxRecipes]);
+
+  // Effect untuk navigasi recipe
+  useEffect(() => {
+    if (mode === "multiple" && recipes.length > 0) {
+      setTreeData(recipes[currentRecipeIndex]);
+      setRenderAttempted(false);
+    }
+  }, [currentRecipeIndex, recipes, mode]);
 
   // Separate effect for rendering the tree
   useEffect(() => {
@@ -170,26 +190,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       window.removeEventListener('resize', handleResize);
     };
   }, [treeData]);
-
-  const createMultipleRecipeTree = (roots, targetName) => {
-    // Validate all roots have the required structure
-    const validRoots = roots.filter(root => {
-      return root && (root.Root === targetName || root.root === targetName);
-    });
-    
-    if (validRoots.length === 0) {
-      console.warn("No valid roots found in response");
-      return null;
-    }
-    
-    // Create a parent node that contains all recipe trees
-    return {
-      root: targetName,
-      Root: targetName,
-      isMultipleRoot: true,
-      children: validRoots
-    };
-  };
 
   const countNodesInTree = (node) => {
     if (!node) return 0;
@@ -268,12 +268,12 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       const treeWidth = getTreeWidth(data);
       const circleRadius = 45; // Circle radius
       
-      // Adjust spacing based on mode
-      const horizontalSpacing = mode === "multiple" ? 350 : 250;
+      // Adjust spacing - lebih besar untuk pembacaan yang lebih mudah
+      const horizontalSpacing = 250;
       const verticalSpacing = 200;
       
       // Calculate dimensions
-      const width = Math.max(1600, treeWidth * horizontalSpacing);
+      const width = Math.max(1200, treeWidth * horizontalSpacing);
       const height = Math.max(800, (treeDepth + 1) * verticalSpacing);
       const margin = { top: 100, right: 150, bottom: 100, left: 150 };
 
@@ -284,11 +284,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       const treeLayout = d3.tree()
         .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
         .separation((a, b) => {
-          // Increase separation for multiple recipes
-          if (mode === "multiple" && a.parent === root && b.parent === root) {
-            return 3;
-          }
-          return a.parent === b.parent ? 1 : 2;
+          return a.parent === b.parent ? 1.5 : 2.5; // Increased separation for better readability
         });
       
       // Apply the tree layout
@@ -328,8 +324,8 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           .attr("r", 30); // Image clip radius
       });
 
-      // Color palette for different recipes
-      const colors = ["#8B4513", "#D2691E", "#CD853F", "#A0522D", "#B8860B", "#654321", "#8B6914", "#A0522D"];
+      // Color for the current recipe
+      const mainColor = "#8B4513";
       
       // Draw links - with error protection
       g.selectAll("path.link")
@@ -351,29 +347,8 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
                   L ${d.target.x} ${targetY}`;
         })
         .attr("fill", "none")
-        .attr("stroke", d => {
-          // Color code different recipe branches
-          if (mode === "multiple" && d.source.data.isMultipleRoot && d.target.parent === root) {
-            const childIndex = root.children.indexOf(d.target);
-            return colors[childIndex % colors.length];
-          }
-          // Maintain color throughout the branch
-          else if (mode === "multiple" && d.target.depth > 1) {
-            let currentNode = d.target;
-            while (currentNode.parent && currentNode.parent !== root) {
-              currentNode = currentNode.parent;
-            }
-            if (currentNode.parent === root) {
-              const branchIndex = root.children.indexOf(currentNode);
-              return colors[branchIndex % colors.length];
-            }
-          }
-          return "#666";
-        })
-        .attr("stroke-width", d => {
-          // Thicker lines for main recipe branches
-          return 3;
-        });
+        .attr("stroke", mainColor)
+        .attr("stroke-width", 3);
       
       // Draw nodes
       const nodes = g.selectAll("g.node")
@@ -388,11 +363,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         .attr("r", circleRadius)
         .attr("fill", d => {
           const elementName = d.data.name;
-          
-          // Special color for multiple root node
-          if (mode === "multiple" && data.isMultipleRoot && d === root) {
-            return "#4B0082"; // Indigo for the main target
-          }
           
           // Check if this is one of the special elements that should be purple
           if (specialElements.includes(elementName)) {
@@ -442,23 +412,8 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         .attr("fill", "white")
         .attr("font-weight", "bold");
 
-      // Add recipe labels for multiple mode
-      if (mode === "multiple" && data.isMultipleRoot) {
-        nodes.filter(d => d.parent === root && d !== root)
-          .append("text")
-          .attr("text-anchor", "middle")
-          .attr("y", -circleRadius - 20)
-          .text((d, i) => `Recipe ${i + 1}`)
-          .attr("font-size", 16)
-          .attr("fill", d => {
-            const index = root.children.indexOf(d);
-            return colors[index % colors.length];
-          })
-          .attr("font-weight", "bold");
-      }
-
-      // Add main title for multiple recipes
-      if (mode === "multiple") {
+      // Tambahkan judul
+      if (mode === "multiple" && totalRecipes > 0) {
         svg.append("text")
           .attr("x", width / 2)
           .attr("y", 40)
@@ -466,10 +421,33 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           .attr("font-size", 24)
           .attr("font-weight", "bold")
           .attr("fill", "#333")
+          .text(`Recipe ${currentRecipeIndex + 1} of ${totalRecipes} for ${target}`);
+      } else {
+        svg.append("text")
+          .attr("x", width / 2)
+          .attr("y", 40)
+          .attr("text-anchor", "middle")
+          .attr("font-size", 24)
+          .attr("font-weight", "bold")
+          .attr("fill", "#333")
+          .text(`Recipe for ${target}`);
       }
     } catch (err) {
       console.error("Error rendering tree:", err);
       setError(`Error rendering tree: ${err.message}`);
+    }
+  };
+
+  // Handler untuk navigasi
+  const handlePrevRecipe = () => {
+    if (currentRecipeIndex > 0) {
+      setCurrentRecipeIndex(currentRecipeIndex - 1);
+    }
+  };
+
+  const handleNextRecipe = () => {
+    if (currentRecipeIndex < totalRecipes - 1) {
+      setCurrentRecipeIndex(currentRecipeIndex + 1);
     }
   };
 
@@ -501,5 +479,38 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     );
   }
 
-  return <svg ref={ref}></svg>;
+  return (
+    <div className="flex flex-col items-center">
+      {mode === "multiple" && totalRecipes > 0 && (
+        <div className="flex items-center justify-center mb-4 space-x-4">
+          <button 
+            onClick={handlePrevRecipe}
+            disabled={currentRecipeIndex === 0}
+            className={`px-4 py-2 rounded-lg font-semibold ${
+              currentRecipeIndex === 0 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-500' 
+                : 'bg-primary text-white hover:bg-primary-hover border-2 border-secondary'
+            }`}
+          >
+            Previous Recipe
+          </button>
+          <span className="text-lg font-semibold">
+            {currentRecipeIndex + 1} / {totalRecipes}
+          </span>
+          <button 
+            onClick={handleNextRecipe}
+            disabled={currentRecipeIndex === totalRecipes - 1}
+            className={`px-4 py-2 rounded-lg font-semibold ${
+              currentRecipeIndex === totalRecipes - 1 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-500' 
+                : 'bg-primary text-white hover:bg-primary-hover border-2 border-secondary'
+            }`}
+          >
+            Next Recipe
+          </button>
+        </div>
+      )}
+      <svg ref={ref}></svg>
+    </div>
+  );
 }
