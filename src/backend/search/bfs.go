@@ -3,18 +3,127 @@ package search
 import (
 	"Tubes2_alchendol/models"
 	"fmt"
-	"sort"
 	"time"
+	"sort"
 )
 
-type TreeNode struct {
-	Root     string     `json:"root"`
-	Left     string     `json:"left"`
-	Right    string     `json:"right"`
-	Tier     string     `json:"tier"`
-	Children []*TreeNode `json:"children"`
+// BFS performs a breadth-first search to find the shortest recipe for the target element
+func BFS(target string, elements []models.Element) (models.RecipeTree, float64, int) {
+	start := time.Now()
+
+	recipeMap, tierMap := processRecipes(elements, target)
+	
+	// Jika target adalah elemen dasar, langsung buat recipe tree
+	if IsBasicElement(target) {
+		return createBasicElementLeaf(target), time.Since(start).Seconds(), 1
+	}
+	
+	recipes, exists := recipeMap[target]
+	if !exists {
+		return models.RecipeTree{}, time.Since(start).Seconds(), 0
+	}
+
+	// Iterasi elemen untuk mencari yang sesuai dengan target dan membangun pohon
+	for _, recipe := range recipes {
+		if len(recipe) != 2 {
+			continue
+		}
+
+		left, right := recipe[0], recipe[1]
+		leftTier, leftExists := tierMap[left]
+		rightTier, rightExists := tierMap[right]
+
+		if !leftExists || !rightExists || leftTier >= tierMap[target] || rightTier > tierMap[target] {
+			continue
+		}
+
+		root := createRecipeTreeNode(target, left, right, tierMap[target])
+
+		// Queue untuk BFS
+		type queueItem struct {
+			parentNodeIdx int            // Index dari node parent dalam slice nodes
+			element       string
+			tier          int
+		}
+
+		// Slice untuk menyimpan semua node
+		nodes := []models.RecipeTree{root}
+		rootIdx := 0
+
+		queue := []queueItem{
+			{rootIdx, left, leftTier},
+			{rootIdx, right, rightTier},
+		}
+
+		nodesVisited := 1 
+
+		// Melakukan pencarian BFS
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			nodesVisited++
+
+			// Jika elemen adalah dasar, tambahkan sebagai daun
+			if IsBasicElementWithTier(current.element, tierMap) {
+				leaf := createBasicElementLeaf(current.element)
+				
+				// Tambahkan leaf ke children dari parent node
+				parentNode := &nodes[current.parentNodeIdx]
+				parentNode.Children = append(parentNode.Children, leaf)
+				continue
+			}
+
+			// Mencari resep untuk elemen saat ini
+			elementRecipes, exists := recipeMap[current.element]
+			if !exists {
+				continue
+			}
+
+			// Loop melalui resep untuk mencari yang bisa digunakan
+			for _, r := range elementRecipes {
+				if len(r) != 2 {
+					continue
+				}
+				left, right := r[0], r[1]
+				leftTier, leftOk := tierMap[left]
+				rightTier, rightOk := tierMap[right]
+
+				if !leftOk || !rightOk || leftTier >= current.tier || rightTier >= current.tier {
+					continue
+				}
+
+				// Membuat node anak dari resep
+				childNode := createRecipeTreeNode(current.element, left, right, current.tier)
+				
+				// Tambahkan child node ke nodes slice
+				nodes = append(nodes, childNode)
+				childIdx := len(nodes) - 1
+				
+				// Tambahkan child node ke children dari parent node
+				parentNode := &nodes[current.parentNodeIdx]
+				parentNode.Children = append(parentNode.Children, childNode)
+
+				// Menambahkan anak ke dalam queue
+				queue = append(queue,
+					queueItem{childIdx, left, leftTier},
+					queueItem{childIdx, right, rightTier},
+				)
+				break // ambil satu resep saja
+			}
+		}
+
+		// Deep copy node untuk menghindari referensi yang sama
+		result := deepCopyRecipeTree(nodes[0])
+		return result, time.Since(start).Seconds(), nodesVisited
+	}
+
+	return models.RecipeTree{}, time.Since(start).Seconds(), 0
 }
 
+// Fungsi helper yang dipakai oleh kedua algoritma (BFS dan MultipleBFS)
+// Memisahkan ke utils.go agar tidak didefinisikan dua kali
+
+// Fungsi untuk memproses resep dan membuat map untuk pencarian
 func processRecipes(recipes []models.Element, target string) (map[string][][]string, map[string]int) {
 	foundTarget := false
 	
@@ -63,112 +172,49 @@ func processRecipes(recipes []models.Element, target string) (map[string][][]str
 	return recipeMap, tierMap
 }
 
-func BFS(target string, elements []models.Element) (*TreeNode, float64, int) {
-	start := time.Now()
-
-	recipeMap, tierMap := processRecipes(elements, target)
-	
-	recipes, exists := recipeMap[target]
-	if !exists {
-		return nil, time.Since(start).Seconds(), 0
+// Deep copy untuk RecipeTree
+func deepCopyRecipeTree(tree models.RecipeTree) models.RecipeTree {
+	copied := models.RecipeTree{
+		Root:     tree.Root,
+		Left:     tree.Left,
+		Right:    tree.Right,
+		Tier:     tree.Tier,
+		Children: []models.RecipeTree{},
 	}
 	
-
-	// Iterasi elemen untuk mencari yang sesuai dengan target dan membangun pohon
-	for _, recipe := range recipes {
-		if len(recipe) != 2 {
-			continue
-		}
-
-		left, right := recipe[0], recipe[1]
-		leftTier, leftExists := tierMap[left]
-		rightTier, rightExists := tierMap[right]
-
-		if !leftExists || !rightExists || leftTier >= tierMap[target] || rightTier > tierMap[target] {
-			continue
-		}
-
-		root := &TreeNode{
-			Root:     target,
-			Left:     left,
-			Right:    right,
-			Tier:     fmt.Sprintf("%d", tierMap[target]),
-			Children: []*TreeNode{},
-		}
-
-		// Queue untuk BFS
-		type queueItem struct {
-			parentNode *TreeNode
-			element    string
-			tier       int
-		}
-
-		queue := []queueItem{
-			{root, left, leftTier},
-			{root, right, rightTier},
-		}
-
-		nodesVisited := 1 
-
-		// Melakukan pencarian BFS
-		for len(queue) > 0 {
-			current := queue[0]
-			queue = queue[1:]
-			nodesVisited++
-
-			// Jika elemen adalah dasar, tambahkan sebagai daun
-			if IsBasicElement(current.element) {
-				leaf := &TreeNode{
-					Root:     current.element,
-					Left:     "",
-					Right:    "",
-					Tier:     "0",
-					Children: []*TreeNode{},
-				}
-				current.parentNode.Children = append(current.parentNode.Children, leaf)
-				continue
-			}
-
-			// Mencari resep untuk elemen saat ini
-			elementRecipes, exists := recipeMap[current.element]
-			if !exists {
-				continue
-			}
-
-			// Loop melalui resep untuk mencari yang bisa digunakan
-			for _, r := range elementRecipes {
-				if len(r) != 2 {
-					continue
-				}
-				left, right := r[0], r[1]
-				leftTier, leftOk := tierMap[left]
-				rightTier, rightOk := tierMap[right]
-
-				if !leftOk || !rightOk || leftTier >= current.tier || rightTier >= current.tier {
-					continue
-				}
-
-				// Membuat node anak dari resep
-				childNode := &TreeNode{
-					Root:     current.element,
-					Left:     left,
-					Right:    right,
-					Tier:     fmt.Sprintf("%d", current.tier),
-					Children: []*TreeNode{},
-				}
-				current.parentNode.Children = append(current.parentNode.Children, childNode)
-
-				// Menambahkan anak ke dalam queue
-				queue = append(queue,
-					queueItem{childNode, left, leftTier},
-					queueItem{childNode, right, rightTier},
-				)
-				break // ambil satu resep saja
-			}
-		}
-
-		return root, time.Since(start).Seconds(), nodesVisited
+	for _, child := range tree.Children {
+		copied.Children = append(copied.Children, deepCopyRecipeTree(child))
 	}
+	
+	return copied
+}
 
-	return nil, time.Since(start).Seconds(), 0
+// Cek apakah elemen adalah elemen dasar
+func IsBasicElementWithTier(element string, tierMap map[string]int) bool {
+	if tier, exists := tierMap[element]; exists {
+		return tier == 0
+	}
+	return IsBasicElement(element)
+}
+
+// Buat node daun (leaf node) untuk elemen dasar
+func createBasicElementLeaf(element string) models.RecipeTree {
+	return models.RecipeTree{
+		Root:     element,
+		Left:     "",
+		Right:    "",
+		Tier:     "0",
+		Children: []models.RecipeTree{},
+	}
+}
+
+// Membuat recipe tree node dengan data yang diberikan
+func createRecipeTreeNode(element string, left string, right string, tier int) models.RecipeTree {
+	return models.RecipeTree{
+		Root:     element,
+		Left:     left,
+		Right:    right,
+		Tier:     fmt.Sprintf("%d", tier),
+		Children: []models.RecipeTree{},
+	}
 }
