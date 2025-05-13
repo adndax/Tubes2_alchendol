@@ -49,13 +49,13 @@ func SearchHandler(c *gin.Context) {
         requestID, algo, target, mode, multipleStr, maxRecipesStr)
 
 	if target == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Target tidak boleh kosong"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target tidak boleh kosong"})
 		return
 	}
 
 	elements, err := LoadRecipeData()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal load recipes"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal load recipes"})
 		return
 	}
 
@@ -127,8 +127,11 @@ func SearchHandler(c *gin.Context) {
     resultChan := make(chan map[string]interface{}, 1)
     errChan := make(chan error, 1)
 
+    // Normalize algorithm name to lowercase for consistent matching
+    algo = strings.ToLower(algo)
+    
     switch algo {
-    case "DFS":
+    case "dfs":
         if multiple {
             fmt.Printf("[%s] Starting MultipleDFS with maxRecipes=%d\n", requestID, maxRecipes)
             
@@ -138,7 +141,7 @@ func SearchHandler(c *gin.Context) {
                     if r := recover(); r != nil {
                         fmt.Printf("[%s] Recovered from panic: %v\n", requestID, r)
                         select {
-                        case errChan <- fmt.Errorf("Recovered from panic in MultipleDFS: %v", r):
+                        case errChan <- fmt.Errorf("recovered from panic in MultipleDFS: %v", r):
                         case <-ctx.Done():
                             fmt.Printf("[%s] Context done while sending error\n", requestID)
                         }
@@ -195,7 +198,7 @@ func SearchHandler(c *gin.Context) {
                 c.Header("Cache-Control", "no-store, no-cache")
                 c.Header("X-Request-ID", requestID)
                 c.JSON(http.StatusRequestTimeout, gin.H{
-                    "error": fmt.Sprintf("Search timed out after %d seconds. The element '%s' (tier %d) is too complex or requires more time.", 
+                    "error": fmt.Sprintf("search timed out after %d seconds. the element '%s' (tier %d) is too complex or requires more time.", 
                         int(timeoutDuration.Seconds()), target, targetTier),
                     "target": target,
                     "requestId": requestID,
@@ -209,7 +212,7 @@ func SearchHandler(c *gin.Context) {
             go func() {
                 defer func() {
                     if r := recover(); r != nil {
-                        errChan <- fmt.Errorf("Recovered from panic in DFS: %v", r)
+                        errChan <- fmt.Errorf("recovered from panic in DFS: %v", r)
                     }
                 }()
                 
@@ -249,7 +252,7 @@ func SearchHandler(c *gin.Context) {
                 c.Header("Cache-Control", "no-store, no-cache")
                 c.Header("X-Request-ID", requestID)
                 c.JSON(http.StatusRequestTimeout, gin.H{
-                    "error": fmt.Sprintf("Search timed out after %d seconds. The element '%s' (tier %d) is too complex or requires more time.", 
+                    "error": fmt.Sprintf("search timed out after %d seconds. the element '%s' (tier %d) is too complex or requires more time.", 
                         int(timeoutDuration.Seconds()), target, targetTier),
                     "target": target,
                     "requestId": requestID,
@@ -258,7 +261,16 @@ func SearchHandler(c *gin.Context) {
             }
         }
     
-    case "BFS":
+    case "bfs":
+        // Add BFS implementation when available
+        if multiple {
+            // Multiple BFS - to be implemented
+            c.JSON(http.StatusNotImplemented, gin.H{"error": "multiple bfs belum diimplementasi"})
+        } else {
+            // Single BFS - to be implemented  
+            c.JSON(http.StatusNotImplemented, gin.H{"error": "bfs belum diimplementasi"})
+        }
+
 	case "bidirectional":
 		if multiple {
 			// Multiple Bidirectional - now implemented
@@ -363,33 +375,33 @@ func SearchHandler(c *gin.Context) {
 			// Wait for result or timeout
 			select {
 			case result := <-resultChan:
-				c.Header("Content-Type", "application/json")
-				c.Header("Cache-Control", "no-store, no-cache")
-				c.Header("X-Request-ID", requestID)
-				c.JSON(http.StatusOK, result)
+                c.Header("Content-Type", "application/json")
+                c.Header("Cache-Control", "no-store, no-cache")
+                c.Header("X-Request-ID", requestID)
+                c.JSON(http.StatusOK, result)
 				
 			case err := <-errChan:
-				c.Header("Cache-Control", "no-store, no-cache")
-				c.Header("X-Request-ID", requestID)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": err.Error(),
-					"requestId": requestID,
-					"isComplete": false,
-				})
+                c.Header("Cache-Control", "no-store, no-cache")
+                c.Header("X-Request-ID", requestID)
+                c.JSON(http.StatusInternalServerError, gin.H{
+                    "error": err.Error(),
+                    "requestId": requestID,
+                    "isComplete": false,
+                })
 				
 			case <-ctx.Done():
-				c.Header("Cache-Control", "no-store, no-cache")
-				c.Header("X-Request-ID", requestID)
-				c.JSON(http.StatusRequestTimeout, gin.H{
-					"error": fmt.Sprintf("search timed out after %d seconds. the element '%s' (tier %d) is too complex or requires more time.", 
-					int(timeoutDuration.Seconds()), target, targetTier),
-					"target": target,
-					"requestId": requestID,
-					"isComplete": false,
-				})
+                c.Header("Cache-Control", "no-store, no-cache")
+                c.Header("X-Request-ID", requestID)
+                c.JSON(http.StatusRequestTimeout, gin.H{
+                    "error": fmt.Sprintf("search timed out after %d seconds. the element '%s' (tier %d) is too complex or requires more time.", 
+                    int(timeoutDuration.Seconds()), target, targetTier),
+                    "target": target,
+                    "requestId": requestID,
+                    "isComplete": false,
+                })
 			}
 		}
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("algoritma tidak dikenali: %s", algo)})
 	}
-} // Menambahkan kurung kurawal penutup yang hilang di sini
+}
