@@ -10,6 +10,10 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   const [loading, setLoading] = useState(false);
   const [timeoutId, setTimeoutId] = useState(null);
   const [renderAttempted, setRenderAttempted] = useState(false);
+  // Tambahkan state untuk navigasi multiple recipe
+  const [recipes, setRecipes] = useState([]);
+  const [currentRecipeIndex, setCurrentRecipeIndex] = useState(0);
+  const [totalRecipes, setTotalRecipes] = useState(0);
 
   // Create a map for element images - simplified mapping
   const elementImageMap = {};
@@ -21,8 +25,173 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
   const basicElements = ["Air", "Earth", "Fire", "Water"];
   const specialElements = ["Clock", "Death", "Dinosaur", "Family Tree", "Peat", "Skeleton", "Sloth", "Tree"];
 
-  // Memoize the countNodesInTree function
-  const countNodesInTree = useCallback((node) => {
+  // Determine if element is complex and needs longer timeout
+  const isComplexElement = (elementName) => {
+    const complexElements = ["Picnic", "Skyscraper", "City", "Continent", "Horseshoe", "Unicorn"];
+    return complexElements.includes(elementName);
+  };
+
+  // Effect to handle fetching data
+  useEffect(() => {
+    if (!target) return;
+
+    // Clear previous timeout if exists
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+
+    // Reset states on new request
+    setLoading(true);
+    setError(null);
+    setTreeData(null);
+    setRenderAttempted(false);
+    setRecipes([]);
+    setCurrentRecipeIndex(0);
+    setTotalRecipes(0);
+
+    const formattedAlgo = algo.toUpperCase() === "BIDIRECTIONAL" ? "bidirectional" : algo.toUpperCase();
+    
+    // Build the correct URL with all parameters
+    let url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/search?algo=${formattedAlgo}&target=${encodeURIComponent(target)}`;
+    
+    // Important: Make sure we're passing maxRecipes correctly for multiple mode
+    if (mode === "multiple") {
+      // Use both mode and multiple parameters to ensure compatibility
+      url += `&mode=multiple&multiple=true&maxRecipes=${maxRecipes}`;
+    }
+    
+    console.log("Fetching from URL:", url);
+    
+    // Set longer timeout for complex elements
+    const timeoutDuration = isComplexElement(target) ? 30000 : 15000; // 30 seconds for complex elements
+    
+    // Set client-side timeout
+    const fetchTimeoutId = setTimeout(() => {
+      setLoading(false);
+      setError(`Request timed out after ${timeoutDuration/1000} seconds. The server might be busy or the element "${target}" might be too complex to process.`);
+      
+      if (onStatsUpdate) {
+        onStatsUpdate({ nodeCount: 0, timeMs: 0 });
+      }
+    }, timeoutDuration);
+    
+    setTimeoutId(fetchTimeoutId);
+    
+    fetch(url)
+      .then((res) => {
+        // Clear the timeout when we get a response
+        clearTimeout(fetchTimeoutId);
+        
+        if (!res.ok) {
+          if (res.status === 408 || res.status === 504) {
+            throw new Error(`Search timeout: The element "${target}" may be too complex to process. Try a different element or reduce maxRecipes.`);
+          }
+          return res.json().then(errorData => {
+            throw new Error(errorData.error || `HTTP error! status: ${res.status}`);
+          });
+        }
+        return res.json();
+      })
+      .then((data) => {
+        console.log("Raw response data:", JSON.stringify(data, null, 2));
+        
+        // Handle both single and multiple response formats
+        let rootData;
+        let nodeCount;
+        
+        if (mode === "multiple") {
+          if (data.roots && Array.isArray(data.roots)) {
+            if (data.roots.length > 0) {
+              // Untuk multiple mode, simpan semua resep secara terpisah
+              setRecipes(data.roots);
+              setCurrentRecipeIndex(0);
+              setTotalRecipes(data.roots.length);
+              
+              // Pilih resep pertama untuk ditampilkan
+              rootData = data.roots[0];
+              nodeCount = data.nodesVisited || countNodesInTree(rootData);
+            } else {
+              // When we have an empty array, show a friendly message
+              throw new Error(`No recipes could be found for "${target}" in multiple mode. Try a different element or algorithm.`);
+            }
+          } else {
+            throw new Error('Invalid response format for multiple recipes mode');
+          }
+        } else {
+          // Single recipe mode
+          if (data.root) {
+            rootData = data.root;
+            nodeCount = data.nodesVisited || countNodesInTree(rootData);
+          } else {
+            throw new Error('No recipe found in response');
+          }
+        }
+        
+        if (!rootData) {
+          throw new Error('No tree data could be processed');
+        }
+        
+        // Store the tree data in state
+        setTreeData(rootData);
+
+        if (onStatsUpdate) {
+          const timeMs = data.timeElapsed || 0;
+          onStatsUpdate({ nodeCount, timeMs });
+        }
+
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch tree:", err);
+        setError(err.message);
+        setLoading(false);
+        
+        if (onStatsUpdate) {
+          onStatsUpdate({ nodeCount: 0, timeMs: 0 });
+        }
+      });
+      
+    // Cleanup function to clear timeout if component unmounts
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [target, algo, mode, maxRecipes]);
+
+  // Effect untuk navigasi recipe
+  useEffect(() => {
+    if (mode === "multiple" && recipes.length > 0) {
+      setTreeData(recipes[currentRecipeIndex]);
+      setRenderAttempted(false);
+    }
+  }, [currentRecipeIndex, recipes, mode]);
+
+  // Separate effect for rendering the tree
+  useEffect(() => {
+    if (ref.current && treeData && !renderAttempted) {
+      renderTree(treeData);
+      setRenderAttempted(true);
+    }
+  }, [treeData, renderAttempted]);
+
+  // Add window resize listener to redraw the tree
+  useEffect(() => {
+    const handleResize = () => {
+      if (treeData) {
+        renderTree(treeData);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [treeData]);
+
+  const countNodesInTree = (node) => {
     if (!node) return 0;
     let count = 1;
     const children = node.children || node.Children || [];
@@ -120,12 +289,12 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       const treeWidth = getTreeWidth(data);
       const circleRadius = 45; // Circle radius
       
-      // Adjust spacing based on mode
-      const horizontalSpacing = mode === "multiple" ? 350 : 250;
+      // Adjust spacing - lebih besar untuk pembacaan yang lebih mudah
+      const horizontalSpacing = 250;
       const verticalSpacing = 200;
       
       // Calculate dimensions
-      const width = Math.max(1600, treeWidth * horizontalSpacing);
+      const width = Math.max(1200, treeWidth * horizontalSpacing);
       const height = Math.max(800, (treeDepth + 1) * verticalSpacing);
       const margin = { top: 100, right: 150, bottom: 100, left: 150 };
 
@@ -136,11 +305,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
       const treeLayout = d3.tree()
         .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
         .separation((a, b) => {
-          // Increase separation for multiple recipes
-          if (mode === "multiple" && a.parent === root && b.parent === root) {
-            return 3;
-          }
-          return a.parent === b.parent ? 1 : 2;
+          return a.parent === b.parent ? 1.5 : 2.5; // Increased separation for better readability
         });
       
       // Apply the tree layout
@@ -180,8 +345,8 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           .attr("r", 30); // Image clip radius
       });
 
-      // Color palette for different recipes
-      const colors = ["#8B4513", "#D2691E", "#CD853F", "#A0522D", "#B8860B", "#654321", "#8B6914", "#A0522D"];
+      // Color for the current recipe
+      const mainColor = "#8B4513";
       
       // Draw links - with error protection
       g.selectAll("path.link")
@@ -203,29 +368,8 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
                   L ${d.target.x} ${targetY}`;
         })
         .attr("fill", "none")
-        .attr("stroke", d => {
-          // Color code different recipe branches
-          if (mode === "multiple" && d.source.data.isMultipleRoot && d.target.parent === root) {
-            const childIndex = root.children.indexOf(d.target);
-            return colors[childIndex % colors.length];
-          }
-          // Maintain color throughout the branch
-          else if (mode === "multiple" && d.target.depth > 1) {
-            let currentNode = d.target;
-            while (currentNode.parent && currentNode.parent !== root) {
-              currentNode = currentNode.parent;
-            }
-            if (currentNode.parent === root) {
-              const branchIndex = root.children.indexOf(currentNode);
-              return colors[branchIndex % colors.length];
-            }
-          }
-          return "#666";
-        })
-        .attr("stroke-width", d => {
-          // Thicker lines for main recipe branches
-          return 3;
-        });
+        .attr("stroke", mainColor)
+        .attr("stroke-width", 3);
       
       // Draw nodes
       const nodes = g.selectAll("g.node")
@@ -240,11 +384,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         .attr("r", circleRadius)
         .attr("fill", d => {
           const elementName = d.data.name;
-          
-          // Special color for multiple root node
-          if (mode === "multiple" && data.isMultipleRoot && d === root) {
-            return "#4B0082"; // Indigo for the main target
-          }
           
           // Check if this is one of the special elements that should be purple
           if (specialElements.includes(elementName)) {
@@ -294,23 +433,8 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         .attr("fill", "white")
         .attr("font-weight", "bold");
 
-      // Add recipe labels for multiple mode
-      if (mode === "multiple" && data.isMultipleRoot) {
-        nodes.filter(d => d.parent === root && d !== root)
-          .append("text")
-          .attr("text-anchor", "middle")
-          .attr("y", -circleRadius - 20)
-          .text((d, i) => `Recipe ${i + 1}`)
-          .attr("font-size", 16)
-          .attr("fill", d => {
-            const index = root.children.indexOf(d);
-            return colors[index % colors.length];
-          })
-          .attr("font-weight", "bold");
-      }
-
-      // Add main title for multiple recipes
-      if (mode === "multiple") {
+      // Tambahkan judul
+      if (mode === "multiple" && totalRecipes > 0) {
         svg.append("text")
           .attr("x", width / 2)
           .attr("y", 40)
@@ -318,6 +442,16 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           .attr("font-size", 24)
           .attr("font-weight", "bold")
           .attr("fill", "#333")
+          .text(`Recipe ${currentRecipeIndex + 1} of ${totalRecipes} for ${target}`);
+      } else {
+        svg.append("text")
+          .attr("x", width / 2)
+          .attr("y", 40)
+          .attr("text-anchor", "middle")
+          .attr("font-size", 24)
+          .attr("font-weight", "bold")
+          .attr("fill", "#333")
+          .text(`Recipe for ${target}`);
       }
     } catch (err) {
       console.error("Error rendering tree:", err);
@@ -487,6 +621,19 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     };
   }, [treeData, renderTree]);
 
+  // Handler untuk navigasi
+  const handlePrevRecipe = () => {
+    if (currentRecipeIndex > 0) {
+      setCurrentRecipeIndex(currentRecipeIndex - 1);
+    }
+  };
+
+  const handleNextRecipe = () => {
+    if (currentRecipeIndex < totalRecipes - 1) {
+      setCurrentRecipeIndex(currentRecipeIndex + 1);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64 w-full p-4">
@@ -517,5 +664,38 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     );
   }
 
-  return <svg ref={ref}></svg>;
+  return (
+    <div className="flex flex-col items-center">
+      {mode === "multiple" && totalRecipes > 0 && (
+        <div className="flex items-center justify-center mb-4 space-x-4">
+          <button 
+            onClick={handlePrevRecipe}
+            disabled={currentRecipeIndex === 0}
+            className={`px-4 py-2 rounded-lg font-semibold ${
+              currentRecipeIndex === 0 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-500' 
+                : 'bg-primary text-white hover:bg-primary-hover border-2 border-secondary'
+            }`}
+          >
+            Previous Recipe
+          </button>
+          <span className="text-lg font-semibold">
+            {currentRecipeIndex + 1} / {totalRecipes}
+          </span>
+          <button 
+            onClick={handleNextRecipe}
+            disabled={currentRecipeIndex === totalRecipes - 1}
+            className={`px-4 py-2 rounded-lg font-semibold ${
+              currentRecipeIndex === totalRecipes - 1 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-500' 
+                : 'bg-primary text-white hover:bg-primary-hover border-2 border-secondary'
+            }`}
+          >
+            Next Recipe
+          </button>
+        </div>
+      )}
+      <svg ref={ref}></svg>
+    </div>
+  );
 }
