@@ -191,7 +191,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
     };
   }, [treeData]);
 
-  const countNodesInTree = (node) => {
+  const countNodesInTree = useCallback((node) => {
     if (!node) return 0;
     let count = 1;
     const children = node.children || node.Children || [];
