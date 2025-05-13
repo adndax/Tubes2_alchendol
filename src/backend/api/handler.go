@@ -266,52 +266,138 @@ func SearchHandler(c *gin.Context) {
             // Single BFS - to be implemented  
             c.JSON(http.StatusNotImplemented, gin.H{"error": "BFS belum diimplementasi"})
         }
-    
-    case "bidirectional", "Bidirectional", "BIDIRECTIONAL":
-        if multiple {
-            // Multiple Bidirectional - to be implemented
-            c.JSON(http.StatusNotImplemented, gin.H{"error": "Multiple Bidirectional belum diimplementasi"})
-        } else {
-            // Single Bidirectional in a separate goroutine
-            go func() {
-                defer func() {
-                    if r := recover(); r != nil {
-                        errChan <- fmt.Errorf("Recovered from panic in BidirectionalSearch: %v", r)
-                    }
-                }()
-                
-                recipeTree, timeElapsed, nodesVisited := search.BidirectionalSearch(target, elements)
-                
-                response := map[string]interface{}{
-                    "nodesVisited": nodesVisited,
-                    "root": recipeTree,
-                    "timeElapsed": timeElapsed,
-                }
-                
-                resultChan <- response
-            }()
-            
-            // Wait for result or timeout
-            select {
-            case result := <-resultChan:
-                c.Header("Content-Type", "application/json")
-                prettyJSON, err := json.MarshalIndent(result, "", "    ")
-                if err != nil {
-                    c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memformat JSON"})
-                    return
-                }
-                c.Writer.Write(prettyJSON)
-                
-            case err := <-errChan:
-                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-                
-            case <-ctx.Done():
-                c.JSON(http.StatusRequestTimeout, gin.H{
-                    "error": "Waktu pencarian habis. Element terlalu kompleks atau search tree terlalu besar."})
-            }
-        }
 
-    default:
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Algoritma tidak dikenali: " + algo})
-    }
-}
+	case "bidirectional":
+		if multiple {
+			// Multiple Bidirectional - now implemented
+			fmt.Printf("[%s] Starting MultipleBidirectional with maxRecipes=%d\n", requestID, maxRecipes)
+			
+			// Multiple Bidirectional in a separate goroutine
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Printf("[%s] Recovered from panic: %v\n", requestID, r)
+						select {
+						case errChan <- fmt.Errorf("recovered from panic in MultipleBidirectional: %v", r):
+						case <-ctx.Done():
+							fmt.Printf("[%s] Context done while sending error\n", requestID)
+						}
+					}
+				}()
+				
+				fmt.Printf("[%s] Starting MultipleBidirectional\n", requestID)
+				recipes, timeElapsed, nodesVisited := search.MultipleBidirectional(target, elements, maxRecipes)
+				
+				fmt.Printf("[%s] MultipleBidirectional completed with %d recipes\n", requestID, len(recipes))
+				
+				// Format response the same way as MultipleDFS
+				response := map[string]interface{}{
+					"nodesVisited": nodesVisited,
+					"roots": recipes,
+					"timeElapsed": timeElapsed,
+					"requestId": requestID,
+					"recipesCount": len(recipes),
+					"maxRequested": maxRecipes,
+					"target": target,
+					"targetTier": targetTier,
+					"isComplete": true,
+				}
+				
+				select {
+				case resultChan <- response:
+					fmt.Printf("[%s] Sent response to channel\n", requestID)
+				case <-ctx.Done():
+					fmt.Printf("[%s] Context done while sending result\n", requestID)
+				}
+			}()
+			
+			// Wait for result or timeout - same pattern as MultipleDFS
+			select {
+			case result := <-resultChan:
+				fmt.Printf("[%s] Received result, sending to client\n", requestID)
+				c.Header("Content-Type", "application/json")
+				c.Header("Cache-Control", "no-store, no-cache")
+				c.Header("X-Request-ID", requestID)
+				c.JSON(http.StatusOK, result)
+				
+			case err := <-errChan:
+				fmt.Printf("[%s] Received error: %v\n", requestID, err)
+				c.Header("Cache-Control", "no-store, no-cache")
+				c.Header("X-Request-ID", requestID)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": err.Error(),
+					"requestId": requestID,
+					"isComplete": true,
+				})
+				
+			case <-ctx.Done():
+				fmt.Printf("[%s] Request timed out\n", requestID)
+				c.Header("Cache-Control", "no-store, no-cache")
+				c.Header("X-Request-ID", requestID)
+				c.JSON(http.StatusRequestTimeout, gin.H{
+					"error": fmt.Sprintf("search timed out after %d seconds. the element '%s' (tier %d) is too complex or requires more time.", 
+					int(timeoutDuration.Seconds()), target, targetTier),
+					"target": target,
+					"requestId": requestID,
+					"isComplete": false,
+				})
+			}
+			
+			fmt.Printf("[%s] Request handling complete\n", requestID)
+		} else {
+			// Single Bidirectional in a separate goroutine
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						errChan <- fmt.Errorf("recovered from panic in BidirectionalSearch: %v", r)
+					}
+				}()
+				
+				recipeTree, timeElapsed, nodesVisited := search.BidirectionalSearch(target, elements)
+				
+				response := map[string]interface{}{
+					"nodesVisited": nodesVisited,
+					"root": recipeTree,
+					"timeElapsed": timeElapsed,
+					"requestId": requestID,
+					"target": target,
+					"targetTier": targetTier,
+					"isComplete": true,
+				}
+				
+				resultChan <- response
+			}()
+			
+			// Wait for result or timeout
+			select {
+			case result := <-resultChan:
+				c.Header("Content-Type", "application/json")
+				c.Header("Cache-Control", "no-store, no-cache")
+				c.Header("X-Request-ID", requestID)
+				c.JSON(http.StatusOK, result)
+				
+			case err := <-errChan:
+				c.Header("Cache-Control", "no-store, no-cache")
+				c.Header("X-Request-ID", requestID)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": err.Error(),
+					"requestId": requestID,
+					"isComplete": false,
+				})
+				
+			case <-ctx.Done():
+				c.Header("Cache-Control", "no-store, no-cache")
+				c.Header("X-Request-ID", requestID)
+				c.JSON(http.StatusRequestTimeout, gin.H{
+					"error": fmt.Sprintf("search timed out after %d seconds. the element '%s' (tier %d) is too complex or requires more time.", 
+					int(timeoutDuration.Seconds()), target, targetTier),
+					"target": target,
+					"requestId": requestID,
+					"isComplete": false,
+				})
+			}
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("algoritma tidak dikenali: %s", algo)})
+	}
+} // Menambahkan kurung kurawal penutup yang hilang di sini
