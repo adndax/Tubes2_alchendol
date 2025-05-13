@@ -1,14 +1,15 @@
-"use client"
+"use client";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Heading, Paragraph } from "@/components/Typography";
 import { BorderBox } from "@/components/BorderBox";
 import { PrimaryButton, SecondaryButton } from "@/components/Button";
 import { ResultStatCard } from "@/components/Card";
 import TreeDiagram from "@/components/TreeDiagram";
 
-export default function ResultPage() {
+// Component that uses useSearchParams inside Suspense
+function ResultContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   
@@ -136,27 +137,25 @@ export default function ResultPage() {
 
   if (error) {
     return (
-      <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
-        <div className="flex flex-col items-center pt-15 gap-15 w-full pb-20">
-          <BorderBox className="w-full">
-            <div className="flex flex-col items-center p-10 gap-6">
-              <div className="text-red-500 text-lg font-bold mb-4">Error</div>
-              <div className="text-primary">{error}</div>
-              <div className="mt-6">
-                <PrimaryButton label="Go Back to Home" onClick={handleTryAgain} />
-              </div>
+      <div className="flex flex-col items-center pt-15 gap-15 w-full pb-20">
+        <BorderBox className="w-full">
+          <div className="flex flex-col items-center p-10 gap-6">
+            <div className="text-red-500 text-lg font-bold mb-4">Error</div>
+            <div className="text-primary">{error}</div>
+            <div className="mt-6">
+              <PrimaryButton label="Go Back to Home" onClick={handleTryAgain} />
             </div>
-          </BorderBox>
-        </div>
-      </main>
+          </div>
+        </BorderBox>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
+    <div className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
       <div className="flex flex-col items-center pt-15 gap-15 w-full pb-20">
         <div className="flex flex-col gap-4 items-center">
-          <Heading>Eureka! Here's Your Alchemy Route</Heading>
+          <Heading>Eureka! Here&apos;s Your Alchemy Route</Heading>
           <Paragraph>
             You searched, I conjured, and here it is — your magical recipe revealed!
           </Paragraph>
@@ -207,6 +206,17 @@ export default function ResultPage() {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+// Main component with Suspense boundary
+export default function ResultPage() {
+  return (
+    <main className="min-h-screen bg-background flex flex-col items-center p-8 text-foreground font-body">
+      <Suspense fallback={<div>Loading...</div>}>
+        <ResultContent />
+      </Suspense>
     </main>
   );
 }

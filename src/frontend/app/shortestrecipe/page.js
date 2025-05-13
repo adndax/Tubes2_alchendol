@@ -31,7 +31,7 @@ function ShortestRecipeContent() {
   const currentElements = useMemo(() => {
     const start = (page - 1) * itemsPerPage;
     return filteredElements.slice(start, start + itemsPerPage);
-  }, [page, filteredElements]);
+}, [page, filteredElements, itemsPerPage]);
 
   const handleSearch = (query) => {
     setSearchQuery(query);

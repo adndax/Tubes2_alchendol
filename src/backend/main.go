@@ -9,7 +9,7 @@ import (
     
     "github.com/gin-gonic/gin"
     "github.com/gin-contrib/cors"
-    
+   
     "Tubes2_alchendol/api"
     "Tubes2_alchendol/search"
 )
@@ -35,7 +35,6 @@ func main() {
             "message": "Server is running",
         })
     })
-    
 
     searchHandler := api.SearchHandler // Your existing handler
     if os.Getenv("GIN_MODE") != "debug" {

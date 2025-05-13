@@ -1,3 +1,4 @@
+// import necessary fonts
 import { Baloo_2, Poppins } from "next/font/google";
 import "./globals.css";
 
@@ -33,7 +34,15 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={`${baloo.variable} ${poppins.variable} antialiased`}>
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Baloo+2&family=Poppins&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body
+        className={`${baloo.variable} ${poppins.variable} antialiased`}
+      >
         {children}
       </body>
     </html>

@@ -1,25 +1,27 @@
+version: '3.8'
 services:
-  frontend:
-    build:
-      context: ./src/frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./src/frontend:/app
-      - /app/node_modules
-      - /app/.next  # Important: exclude the build directory
-    environment:
-      - NODE_ENV=development
-    depends_on:
-      - backend
-      
   backend:
     build:
       context: ./src/backend
-      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
       - PORT=8080
-    # No volumes for backend - so it uses the compiled binary
+      - DEBUG=true
+      - HTTP_TIMEOUT=60
+      - SEARCH_TIMEOUT=30
+      - MAX_RECIPES=1
+
+  
+  frontend:
+    build:
+      context: ./src/frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - NODE_ENV=production
+      # Add flags to disable turbopack in production
+      - NEXT_NO_TURBO=1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
