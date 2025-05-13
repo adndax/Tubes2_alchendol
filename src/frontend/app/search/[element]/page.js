@@ -19,7 +19,7 @@ export default function ElementDetailPage() {
   const algo = searchParams.get("algo") || "DFS";
   
   // Default to 5 recipes for multiple mode
-  const [quantity, setQuantity] = useState(5);
+  const [quantity, setQuantity] = useState(1);
   const data = elements.find((el) => el.name === element);
 
   if (!data) {

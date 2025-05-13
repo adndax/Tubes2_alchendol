@@ -1,12 +1,19 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SubheadingRed } from "./Typography";
 
 export default function QuantityInput({ value = 1, onChange }) {
   const [quantity, setQuantity] = useState(value);
 
+  // Ensure the initial value is at least 1
+  useEffect(() => {
+    if (value < 1) {
+      update(1);
+    }
+  }, []);
+
   const update = (val) => {
-    const num = Math.max(0, val);
+    const num = Math.max(1, val); // Changed from 0 to 1 for minimum value
     setQuantity(num);
     onChange?.(num);
   };
@@ -16,6 +23,8 @@ export default function QuantityInput({ value = 1, onChange }) {
   
     if (val === "") {
       setQuantity("");
+      // When empty, use default value of 1
+      onChange?.(1);
       return;
     }
   
@@ -34,7 +43,7 @@ export default function QuantityInput({ value = 1, onChange }) {
       </button>
       <input
         type="number"
-        min="0"
+        min="1" // Changed from 0 to 1
         value={quantity}
         onChange={handleInput}
         className="bg-transparent text-center w-7 outline-none font-bold text-primary 
