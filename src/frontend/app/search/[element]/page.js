@@ -68,7 +68,7 @@ export default function ElementDetailPage() {
               <>
                 <div className="flex flex-col items-center gap-2">
                   <Subheading>How many recipes do you want to discover?</Subheading>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col items-center gap-2">
                     <QuantityInput
                       value={quantity}
                       onChange={(val) => setQuantity(val)}

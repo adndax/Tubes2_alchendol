@@ -14,23 +14,26 @@ const poppins = Poppins({
   display: "swap",
 });
 
+// Metadata yang akan dipakai untuk SEMUA halaman
 export const metadata = {
-  title: "Your App Title",
-  description: "Your app description",
+  title: "Alchendol", // Judul yang sama untuk semua halaman
+  description: "Website for researching recipes in Little Alchemy 2",
+  icons: {
+    icon: [
+      { url: "/img/alchendol_logo.png" }, 
+      { url: "/favicon.ico" }
+    ],
+    apple: { url: "/img/alchendol_logo.png" },
+  },
+  manifest: "/manifest.json",
+  applicationName: "Alchendol",
+  appleWebApp: { capable: true, title: "Alchendol", statusBarStyle: "default" },
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Baloo+2&family=Poppins&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body
-        className={`${baloo.variable} ${poppins.variable} antialiased`}
-      >
+      <body className={`${baloo.variable} ${poppins.variable} antialiased`}>
         {children}
       </body>
     </html>

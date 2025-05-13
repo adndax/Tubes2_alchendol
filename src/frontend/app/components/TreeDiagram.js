@@ -372,7 +372,7 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
         })
         .attr("stroke-width", d => {
           // Thicker lines for main recipe branches
-          return (mode === "multiple" && d.source.data.isMultipleRoot) ? 4 : 2;
+          return 3;
         });
       
       // Draw nodes
@@ -406,8 +406,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           
           return "#A6352B"; // Red for other elements
         })
-        .attr("stroke", "#333")
-        .attr("stroke-width", 2);
 
       // Add images inside circles
       nodes.each(function(d, i) {
@@ -468,7 +466,6 @@ export default function TreeDiagram({ target, algo = "DFS", mode = "shortest", m
           .attr("font-size", 24)
           .attr("font-weight", "bold")
           .attr("fill", "#333")
-          .text(`All Recipes for ${target}`);
       }
     } catch (err) {
       console.error("Error rendering tree:", err);
